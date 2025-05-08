@@ -1,0 +1,24 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Data directory
+data/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Local configuration
+.env
+.DS_Store
