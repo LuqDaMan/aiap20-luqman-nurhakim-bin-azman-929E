@@ -56,7 +56,10 @@ def save_object(obj: any, filepath: str) -> None:
                         Directory will be created if it doesn't exist.
     """
     try:
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # Only try to create directories if there's a directory path component
+        dirname = os.path.dirname(filepath)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         joblib.dump(obj, filepath)
         logger.info(f"Object saved successfully to {filepath}")
     except Exception as e:

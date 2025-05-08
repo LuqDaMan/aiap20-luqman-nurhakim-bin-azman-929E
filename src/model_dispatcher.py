@@ -3,12 +3,11 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
-import xgboost as xgb # type: ignore # For XGBClassifier, often imported as xgb
+import xgboost as xgb 
 
 # Type hinting
 from sklearn.base import BaseEstimator, ClassifierMixin
-from typing import Dict, Any, Union, Optional, Type # Type for class types
-
+from typing import Dict, Any, Union, Optional, Type 
 import logging
 logger = logging.getLogger(__name__)
 
