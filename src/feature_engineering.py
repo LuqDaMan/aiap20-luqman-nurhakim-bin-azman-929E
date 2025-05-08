@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import PolynomialFeatures
+from sklearn.exceptions import NotFittedError
 from typing import List, Tuple, Optional, Dict, Union
 
 import logging
