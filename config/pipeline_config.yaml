@@ -1,0 +1,149 @@
+# config/pipeline_config.yaml
+
+# --- General Settings ---
+project_name: "BankTermDepositPrediction"
+random_seed: 42  # FR-MT-004: For reproducibility
+
+# --- Logging ---
+logging:
+  level: "DEBUG"  # or "INFO" if you prefer less verbose logs
+  file: "logs/pipeline/run.log"  # This is where logs will be saved
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  max_size_mb: 10  # Log files rotate after reaching this size
+  backup_count: 5  # Keep this many backup logs
+
+# --- Data Source & Paths --- # FR-DI-001
+data_source:
+  db_path: "data/bmarket.db"
+  table_name: "bank_marketing"
+
+output_paths:
+  log_file: "logs/pipeline.log"
+  model_dir: "models/" # Example: if saving models
+  results_file: "results/evaluation_metrics.csv" # Example: if saving detailed results
+  plots_dir: "plots/" # Example: if saving plots like ROC curve
+
+# --- Feature Definitions & Preprocessing ---
+target_column: "subscription_status" # Standardized from 'Subscription Status'
+client_id_column: "client_id" # FR-FE-005: To be dropped
+
+# FR-DP-002
+age_processing:
+  original_col: "age"
+  cleaned_col: "cleaned_age"
+  anomaly_threshold: 100
+
+# FR-DP-003, FR-DP-004
+categorical_cols_to_standardize:
+  - "occupation"
+  - "marital_status"
+  - "education_level"
+  - "contact_method"
+  - "credit_default"
+
+contact_method_consolidation: # FR-DP-003
+  "cell": "cellular"
+
+# FR-DP-005, DS-MVH-001, DS-MVH-002
+loan_cols_missing_handling:
+  housing_loan: "unknown" # Target category for NaNs and "unknown" strings
+  personal_loan: "unknown" # Target category for NaNs and "unknown" strings
+
+# FR-DP-006
+campaign_calls_processing:
+  original_col: "campaign_calls"
+  negative_adjustment_indicator_col: "cc_had_negative_adjustment"
+
+# FR-DP-007, FR-FE-001, DS-FE-001
+previous_contact_days_processing:
+  original_col: "previous_contact_days"
+  special_value_no_contact: 999
+  previously_contacted_indicator_col: "previously_contacted"
+  value_for_no_contact_after_indicator: 0 # Value for original col if not contacted
+
+# FR-FE-003, DS-ENC-001 (Ordinal Encoding for education_level)
+# Order is important for ordinal features. 'unknown' placement might vary based on interpretation.
+# scratch_ii.py places 'unknown' at the end.
+education_level_order:
+  - "unknown"
+  - "illiterate"
+  - "basic.4y"
+  - "basic.6y"
+  - "basic.9y"
+  - "high.school"
+  - "professional.course"
+  - "university.degree" # FR-DP-004: Treat unknown as a distinct category
+
+# Features for different transformations/encoding (will be dynamically identified but can list fixed ones)
+# FR-FE-002 (Nominal features for One-Hot Encoding)
+nominal_features_for_onehot: # To be confirmed after initial data load and cleaning
+  - "occupation"
+  - "marital_status"
+  - "credit_default"
+  - "housing_loan" # After missing handling
+  - "personal_loan" # After missing handling
+  - "contact_method" # After standardization & consolidation
+
+# FR-FE-004, DS-SCL-001 (Numerical features and scaling strategy)
+numerical_features_for_scaling: # To be confirmed after initial data load and cleaning
+  - "cleaned_age"
+  - "campaign_calls" # Absolute values
+  - "previous_contact_days" # For contacted clients, after 999 is handled
+
+features_for_log_transform: # DS-SCL-001
+  - "campaign_calls"
+  - "previous_contact_days"
+
+# --- Model Training & Tuning ---
+# MD-SPLIT-001
+train_test_split:
+  test_size: 0.2
+  stratify_by_target: True
+
+# FR-MT-003, MD-IMB-001, DC-IMB-001 (Class Imbalance Handling)
+imbalance_handling:
+  method: "SMOTE" # Options: "SMOTE", "class_weight", "None"
+  smote_k_neighbors: 5 # Example parameter for SMOTE
+
+# FR-MT-001, MD-SEL-001 (Models to train)
+models_to_train:
+  - "LogisticRegression"
+  - "RandomForestClassifier"
+  - "GradientBoostingClassifier"
+
+# FR-MT-002, MD-HT-001 (Hyperparameter Tuning)
+hyperparameter_tuning:
+  cv_folds: 5 # MD-HT-001
+  scoring_metric_for_tuning: "f1_weighted" # Or 'f1_macro', 'roc_auc' depending on focus for best params
+
+  # Example search spaces (can be more detailed)
+  param_grids:
+    LogisticRegression:
+      classifier__C: [0.01, 0.1, 1, 10, 100]
+      classifier__solver: ['liblinear'] # Good for smaller datasets and L1/L2 regularization
+      # class_weight handled by imbalance_handling section if method is 'class_weight' for this model
+    RandomForestClassifier:
+      classifier__n_estimators: [100, 200]
+      classifier__max_depth: [10, 20, null]
+      classifier__min_samples_split: [2, 5]
+      classifier__min_samples_leaf: [1, 2]
+    GradientBoostingClassifier:
+      classifier__n_estimators: [100, 200]
+      classifier__learning_rate: [0.01, 0.1, 0.2]
+      classifier__max_depth: [3, 5, 7]
+
+# --- Model Evaluation ---
+# FR-ME-001, MD-EVAL-001 (Primary metric for selecting the best model)
+primary_evaluation_metric: "f1_score_yes_class" # F1-score for the 'yes' class (positive class)
+
+evaluation_metrics: # Metrics to report
+  - "f1_score_yes_class"
+  - "roc_auc_score"
+  - "recall_yes_class"
+  - "precision_yes_class"
+  - "auprc_score" # Area Under Precision-Recall Curve
+
+# --- Target Variable Encoding --- # FR-DP-008
+target_variable_encoding:
+  "no": 0
+  "yes": 1

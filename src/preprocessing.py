@@ -1,577 +1,294 @@
 # src/preprocessing.py
+
 import pandas as pd
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, OrdinalEncoder
-from typing import List, Union, Optional, Dict # Union was used in thought process, changed to Optional where more appropriate
-
 import logging
-logger = logging.getLogger(__name__)
 
-class ColumnSelector(BaseEstimator, TransformerMixin):
-    """Selects specified columns from a DataFrame."""
-    def __init__(self, columns: List[str]):
-        """
-        Args:
-            columns (List[str]): A list of column names to select.
-        """
-        if not isinstance(columns, list) or not all(isinstance(col, str) for col in columns):
-            raise ValueError("Columns must be a list of strings.")
-        self.columns = columns
+logger = logging.getLogger('pipeline.preprocessing') 
 
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        """
-        Checks if the columns exist in the DataFrame.
-        Args:
-            X (pd.DataFrame): The input DataFrame.
-            y (Optional[pd.Series]): Ignored.
-        Returns:
-            self: The fitted transformer.
-        """
-        missing_cols = [col for col in self.columns if col not in X.columns]
-        if missing_cols:
-            raise ValueError(f"The following columns are not in the DataFrame: {missing_cols}")
-        return self
+# --- Helper Functions for Preprocessing Steps ---
 
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """
-        Transforms the DataFrame by selecting the specified columns.
-        Args:
-            X (pd.DataFrame): The input DataFrame.
-        Returns:
-            pd.DataFrame: A DataFrame with only the selected columns.
-        """
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-        try:
-            return X[self.columns].copy() # Use .copy() to avoid SettingWithCopyWarning on downstream tasks
-        except KeyError as e:
-            raise ValueError(f"Error selecting columns. Make sure all columns {self.columns} exist in the input DataFrame. Original error: {e}")
+def _standardize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Standardizes all column names to lowercase_with_underscores."""
+    original_columns = df.columns.tolist()
+    df.columns = df.columns.str.lower().str.replace(' ', '_').str.replace('[^0-9a-zA-Z_]', '', regex=True)
+    standardized_columns = df.columns.tolist()
+    if original_columns != standardized_columns:
+        logger.info("Standardized column names.")
+        logger.debug(f"Original columns: {original_columns}")
+        logger.debug(f"Standardized columns: {standardized_columns}")
+    return df
 
+def _preprocess_age(df: pd.DataFrame, age_config: dict) -> pd.DataFrame:
+    """Processes the age column: removes ' years', converts to numeric, handles anomalies and NaNs."""
+    age_col = age_config.get('original_col', 'age')
+    cleaned_age_col = age_config.get('cleaned_col', 'cleaned_age')
+    anomaly_threshold = age_config.get('anomaly_threshold', 100)
 
-class NumericalImputer(BaseEstimator, TransformerMixin):
-    """
-    Imputes missing values in numerical columns using mean, median, or a constant.
-    """
-    def __init__(self, strategy: str = 'median', variables: Optional[List[str]] = None, fill_value: Optional[Union[int, float]] = None):
-        """
-        Args:
-            strategy (str): The imputation strategy. One of 'mean', 'median', 'constant'.
-                            Defaults to 'median'.
-            variables (Optional[List[str]]): List of numerical column names to impute.
-                                             If None, will try to apply to all numerical columns.
-            fill_value (Optional[Union[int, float]]): Value to use when strategy is 'constant'.
-        """
-        if strategy not in ['mean', 'median', 'constant']:
-            raise ValueError(f"Strategy must be one of 'mean', 'median', 'constant'. Got {strategy}")
-        if strategy == 'constant' and fill_value is None:
-            raise ValueError("If strategy is 'constant', fill_value must be provided.")
+    if age_col not in df.columns:
+        logger.warning(f"Original age column '{age_col}' not found. Skipping age preprocessing.")
+        return df
 
-        self.strategy = strategy
-        self.variables = variables
-        self.fill_value = fill_value
-        self.imputer_: Optional[SimpleImputer] = None # Stores the fitted sklearn imputer
-        self.fit_params_: Dict = {} # Stores parameters learned during fit (e.g., means or medians)
+    logger.debug(f"Processing age column: '{age_col}' into '{cleaned_age_col}'. Anomaly threshold: {anomaly_threshold}")
+    
+    # Ensure it's string type before replacing, then coerce to numeric
+    df[age_col] = df[age_col].astype(str).str.replace(' years', '', regex=False)
+    df[age_col] = pd.to_numeric(df[age_col], errors='coerce') # Coerce will turn empty strings and non-numeric to NaN
 
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
+    # Calculate median on valid ages (<= threshold and not NaN)
+    valid_ages = df.loc[(df[age_col] <= anomaly_threshold) & (df[age_col].notna()), age_col]
+    if not valid_ages.empty:
+        age_median = valid_ages.median()
+        logger.debug(f"Median age (for values <= {anomaly_threshold} and non-NaN): {age_median}")
+    else:
+        age_median = df[age_col].median() # Median of all numeric ages, whatever they are
+        logger.warning(f"No ages found <= {anomaly_threshold}. Using overall median {age_median} for imputation.")
 
-        if self.variables is None:
-            self.variables_ = X.select_dtypes(include=np.number).columns.tolist()
-            if not self.variables_:
-                logger.warning("No numerical variables found to impute.")
-                return self
-        else:
-            self.variables_ = [var for var in self.variables if var in X.columns]
-            if not self.variables_:
-                logger.warning(f"None of the specified variables {self.variables} found in the DataFrame.")
-                return self
-            if not all(pd.api.types.is_numeric_dtype(X[var]) for var in self.variables_ if var in X.columns):
-                non_numeric_vars = [var for var in self.variables_ if not pd.api.types.is_numeric_dtype(X[var])]
-                raise TypeError(f"All 'variables' for NumericalImputer must be numeric. Non-numeric: {non_numeric_vars}")
-
-
-        if not self.variables_: # If still no variables after checks
-            return self
-
-        self.imputer_ = SimpleImputer(strategy=self.strategy, fill_value=self.fill_value)
-        self.imputer_.fit(X[self.variables_])
-
-        # Store learned statistics for potential inspection
-        if self.strategy in ['mean', 'median']:
-            self.fit_params_ = dict(zip(self.variables_, self.imputer_.statistics_))
-        elif self.strategy == 'constant':
-             self.fit_params_ = {var: self.fill_value for var in self.variables_}
-        logger.info(f"NumericalImputer fitted with strategy '{self.strategy}' for variables: {self.variables_}")
-        return self
-
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-        if self.imputer_ is None or not hasattr(self, 'variables_') or not self.variables_:
-            logger.warning("NumericalImputer is not fitted or no variables to transform.")
-            return X.copy()
-
-        X_transformed = X.copy()
-        # Ensure variables_ exist in X before attempting to transform
-        vars_to_transform = [var for var in self.variables_ if var in X_transformed.columns]
-        if not vars_to_transform:
-            logger.warning(f"None of the fitted variables {self.variables_} are present in the input DataFrame for transform.")
-            return X_transformed
-
-        X_transformed[vars_to_transform] = self.imputer_.transform(X_transformed[vars_to_transform])
-        logger.debug(f"NumericalImputation applied to variables: {vars_to_transform}")
-        return X_transformed
-
-
-class CategoricalImputer(BaseEstimator, TransformerMixin):
-    """
-    Imputes missing values in categorical columns using most frequent value or a constant.
-    """
-    def __init__(self, strategy: str = 'most_frequent', variables: Optional[List[str]] = None, fill_value: str = 'Missing'):
-        """
-        Args:
-            strategy (str): The imputation strategy. One of 'most_frequent', 'constant'.
-                            Defaults to 'most_frequent'.
-            variables (Optional[List[str]]): List of categorical column names to impute.
-                                             If None, will apply to all object/category columns.
-            fill_value (str): Value to use when strategy is 'constant'. Defaults to 'Missing'.
-        """
-        if strategy not in ['most_frequent', 'constant']:
-            raise ValueError(f"Strategy must be one of 'most_frequent', 'constant'. Got {strategy}")
-        self.strategy = strategy
-        self.variables = variables
-        self.fill_value = fill_value
-        self.imputer_: Optional[SimpleImputer] = None
-        self.fit_params_: Dict = {}
-
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-
-        if self.variables is None:
-            self.variables_ = X.select_dtypes(include=['object', 'category']).columns.tolist()
-            if not self.variables_:
-                logger.warning("No categorical variables found to impute.")
-                return self
-        else:
-            self.variables_ = [var for var in self.variables if var in X.columns]
-            if not self.variables_:
-                logger.warning(f"None of the specified variables {self.variables} found in the DataFrame.")
-                return self
-            # Consider checking if they are actually categorical/object types
-            # for var in self.variables_:
-            #     if not pd.api.types.is_object_dtype(X[var]) and not pd.api.types.is_categorical_dtype(X[var]):
-            #         raise TypeError(f"Variable '{var}' for CategoricalImputer is not of object or category type.")
-
-
-        if not self.variables_:
-            return self
-
-        self.imputer_ = SimpleImputer(strategy=self.strategy, fill_value=self.fill_value)
-        self.imputer_.fit(X[self.variables_])
-
-        if self.strategy == 'most_frequent':
-            self.fit_params_ = dict(zip(self.variables_, self.imputer_.statistics_))
-        elif self.strategy == 'constant':
-             self.fit_params_ = {var: self.fill_value for var in self.variables_}
-        logger.info(f"CategoricalImputer fitted with strategy '{self.strategy}' for variables: {self.variables_}")
-        return self
-
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-        if self.imputer_ is None or not hasattr(self, 'variables_') or not self.variables_:
-            logger.warning("CategoricalImputer is not fitted or no variables to transform.")
-            return X.copy()
-
-        X_transformed = X.copy()
-        vars_to_transform = [var for var in self.variables_ if var in X_transformed.columns]
-        if not vars_to_transform:
-            logger.warning(f"None of the fitted variables {self.variables_} are present in the input DataFrame for transform.")
-            return X_transformed
-
-        X_transformed[vars_to_transform] = self.imputer_.transform(X_transformed[vars_to_transform])
-        logger.debug(f"CategoricalImputation applied to variables: {vars_to_transform}")
-        return X_transformed
-
-
-class SklearnScalerWrapper(BaseEstimator, TransformerMixin):
-    """
-    A wrapper for scikit-learn scalers (StandardScaler, MinMaxScaler, RobustScaler).
-    Operates on specified numerical variables.
-    """
-    def __init__(self, scaler_type: str = 'standard', variables: Optional[List[str]] = None):
-        """
-        Args:
-            scaler_type (str): Type of scaler. One of 'standard', 'minmax', 'robust'.
-                               Defaults to 'standard'.
-            variables (Optional[List[str]]): List of numerical column names to scale.
-                                             If None, will apply to all numerical columns.
-        """
-        if scaler_type not in ['standard', 'minmax', 'robust']:
-            raise ValueError("scaler_type must be 'standard', 'minmax', or 'robust'.")
-        self.scaler_type = scaler_type
-        self.variables = variables
-        self.scaler_: Optional[Union[StandardScaler, MinMaxScaler, RobustScaler]] = None
-
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-
-        if self.variables is None:
-            self.variables_ = X.select_dtypes(include=np.number).columns.tolist()
-            if not self.variables_:
-                logger.warning("No numerical variables found to scale.")
-                return self
-        else:
-            self.variables_ = [var for var in self.variables if var in X.columns]
-            if not self.variables_:
-                logger.warning(f"None of the specified variables {self.variables} found for scaling.")
-                return self
-            if not all(pd.api.types.is_numeric_dtype(X[var]) for var in self.variables_):
-                non_numeric_vars = [var for var in self.variables_ if not pd.api.types.is_numeric_dtype(X[var])]
-                raise TypeError(f"All 'variables' for SklearnScalerWrapper must be numeric. Non-numeric: {non_numeric_vars}")
-
-
-        if not self.variables_:
-            return self
-
-        if self.scaler_type == 'standard':
-            self.scaler_ = StandardScaler()
-        elif self.scaler_type == 'minmax':
-            self.scaler_ = MinMaxScaler()
-        elif self.scaler_type == 'robust':
-            self.scaler_ = RobustScaler()
-
-        self.scaler_.fit(X[self.variables_])
-        logger.info(f"SklearnScalerWrapper (type: {self.scaler_type}) fitted for variables: {self.variables_}")
-        return self
-
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-        if self.scaler_ is None or not hasattr(self, 'variables_') or not self.variables_:
-            logger.warning(f"SklearnScalerWrapper (type: {self.scaler_type}) is not fitted or no variables to transform.")
-            return X.copy()
-
-        X_transformed = X.copy()
-        vars_to_transform = [var for var in self.variables_ if var in X_transformed.columns]
-        if not vars_to_transform:
-            logger.warning(f"None of the fitted variables {self.variables_} are present in the input DataFrame for transform.")
-            return X_transformed
+    # Create cleaned_age column
+    df[cleaned_age_col] = df[age_col]
+    
+    # Handle anomalies (> threshold)
+    anomalous_age_count = df[df[cleaned_age_col] > anomaly_threshold].shape[0]
+    if anomalous_age_count > 0:
+        logger.info(f"Found {anomalous_age_count} age values > {anomaly_threshold}. Imputing with median: {age_median}.")
+        df.loc[df[cleaned_age_col] > anomaly_threshold, cleaned_age_col] = age_median
         
-        X_transformed[vars_to_transform] = self.scaler_.transform(X_transformed[vars_to_transform])
-        logger.debug(f"Scaling applied to variables: {vars_to_transform}")
-        return X_transformed
+    # Handle NaNs (which might have been original NaNs, empty strings, or non-numeric strings)
+    nan_age_count = df[cleaned_age_col].isna().sum()
+    if nan_age_count > 0:
+        logger.info(f"Found {nan_age_count} NaN values in '{cleaned_age_col}'. Imputing with median: {age_median}.")
+        df[cleaned_age_col] = df[cleaned_age_col].fillna(age_median)
 
+    df = df.drop(columns=[age_col])
+    logger.info(f"Age column '{age_col}' processed into '{cleaned_age_col}'.")
+    return df
 
-class SklearnEncoderWrapper(BaseEstimator, TransformerMixin):
-    """
-    A wrapper for scikit-learn categorical encoders (OneHotEncoder, OrdinalEncoder).
-    Operates on specified categorical variables.
-    """
-    def __init__(self, encoder_type: str = 'onehot', variables: Optional[List[str]] = None,
-                 handle_unknown: str = 'ignore', drop_first_if_onehot: bool = False):
-        """
-        Args:
-            encoder_type (str): Type of encoder. One of 'onehot', 'ordinal'. Defaults to 'onehot'.
-            variables (Optional[List[str]]): List of categorical column names to encode.
-                                             If None, will apply to all object/category columns.
-            handle_unknown (str): For OneHotEncoder, how to handle unknown categories.
-                                  'error' or 'ignore'. Defaults to 'ignore'.
-                                  For OrdinalEncoder, set to 'use_encoded_value' and provide `unknown_value`.
-            drop_first_if_onehot (bool): Whether to drop the first category in OneHotEncoder
-                                         to avoid multicollinearity. Defaults to False.
-        """
-        if encoder_type not in ['onehot', 'ordinal']:
-            raise ValueError("encoder_type must be 'onehot' or 'ordinal'.")
-        self.encoder_type = encoder_type
-        self.variables = variables
-        self.handle_unknown = handle_unknown
-        self.drop_first_if_onehot = drop_first_if_onehot
-        self.encoder_: Optional[Union[OneHotEncoder, OrdinalEncoder]] = None
-        self.encoded_feature_names_: Optional[List[str]] = None
-
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-
-        if self.variables is None:
-            self.variables_ = X.select_dtypes(include=['object', 'category']).columns.tolist()
-            if not self.variables_:
-                logger.warning("No categorical variables found to encode.")
-                return self
+def _standardize_categorical_strings(df: pd.DataFrame, cat_cols_config: list, contact_method_config: dict) -> pd.DataFrame:
+    """Standardizes string values in specified categorical columns (lowercase, strip whitespace, consolidate)."""
+    logger.debug(f"Standardizing categorical columns: {cat_cols_config}")
+    for col in cat_cols_config:
+        if col in df.columns:
+            original_dtype = df[col].dtype
+            # Convert to string type first to handle potential mixed types gracefully
+            df[col] = df[col].astype(str).str.lower().str.strip()
+            
+            if col == 'contact_method' and contact_method_config:
+                for K, V in contact_method_config.items():
+                    df[col] = df[col].replace(K, V)
+                logger.info(f"Consolidated values in 'contact_method' using mapping: {contact_method_config}")
+            
+            # FR-DP-004: "unknown" string values are standardized here. Their treatment as a distinct category happens in encoding.
+            logger.debug(f"Standardized categorical column: '{col}'. 'unknown' values standardized if present.")
         else:
-            self.variables_ = [var for var in self.variables if var in X.columns]
-            if not self.variables_:
-                logger.warning(f"None of the specified variables {self.variables} found for encoding.")
-                return self
-            # for var in self.variables_: # Type check
-            #     if not pd.api.types.is_object_dtype(X[var]) and not pd.api.types.is_categorical_dtype(X[var]):
-            #         raise TypeError(f"Variable '{var}' for SklearnEncoderWrapper is not of object or category type.")
+            logger.warning(f"Categorical column '{col}' for standardization not found in DataFrame. Skipping.")
+    return df
 
-
-        if not self.variables_:
-            return self
-
-        if self.encoder_type == 'onehot':
-            drop_strategy = 'first' if self.drop_first_if_onehot else None
-            self.encoder_ = OneHotEncoder(handle_unknown=self.handle_unknown, sparse_output=False, drop=drop_strategy)
-        elif self.encoder_type == 'ordinal':
-            # For ordinal, handle_unknown requires unknown_value to be set if using 'use_encoded_value'
-            if self.handle_unknown == 'use_encoded_value':
-                 # Define a conventional unknown value (e.g., -1 or a large number)
-                self.encoder_ = OrdinalEncoder(handle_unknown=self.handle_unknown, unknown_value=np.nan) # Will impute later if needed
-            else: # default 'error'
-                self.encoder_ = OrdinalEncoder()
-
-
-        self.encoder_.fit(X[self.variables_])
-
-        if self.encoder_type == 'onehot':
-            try:
-                self.encoded_feature_names_ = self.encoder_.get_feature_names_out(self.variables_).tolist()
-            except Exception as e:
-                logger.error(f"Could not get feature names from OneHotEncoder. Check sklearn version. Error: {e}")
-                # Fallback for older sklearn or simple naming
-                new_cols = []
-                for i, var_name in enumerate(self.variables_):
-                    for cat in self.encoder_.categories_[i]:
-                        new_cols.append(f"{var_name}_{cat}")
-                # This fallback won't respect drop='first' correctly in naming easily.
-                # Modern sklearn's get_feature_names_out is preferred.
-                self.encoded_feature_names_ = new_cols
-
-
-        logger.info(f"SklearnEncoderWrapper (type: {self.encoder_type}) fitted for variables: {self.variables_}")
-        return self
-
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-        if self.encoder_ is None or not hasattr(self, 'variables_') or not self.variables_:
-            logger.warning(f"SklearnEncoderWrapper (type: {self.encoder_type}) is not fitted or no variables to transform.")
-            return X.copy()
-
-        X_transformed = X.copy()
-        vars_to_encode = [var for var in self.variables_ if var in X_transformed.columns]
-
-        if not vars_to_encode:
-            logger.warning(f"None of the fitted variables {self.variables_} are present in the input DataFrame for encoding.")
-            return X_transformed
-
-        encoded_data = self.encoder_.transform(X_transformed[vars_to_encode])
-
-        if self.encoder_type == 'onehot':
-            if not self.encoded_feature_names_: # Fallback if names weren't generated in fit
-                 logger.warning("Encoded feature names not available for OneHotEncoder. Original columns will be dropped and replaced by numerically named columns.")
-                 # This situation is less ideal; consider raising an error or more robust naming.
-                 num_output_features = encoded_data.shape[1]
-                 self.encoded_feature_names_ = [f"ohe_feat_{i}" for i in range(num_output_features)]
-
-
-            encoded_df = pd.DataFrame(encoded_data, columns=self.encoded_feature_names_, index=X_transformed.index)
-            X_transformed = X_transformed.drop(columns=vars_to_encode)
-            X_transformed = pd.concat([X_transformed, encoded_df], axis=1)
-        elif self.encoder_type == 'ordinal':
-            X_transformed[vars_to_encode] = encoded_data
-            # Handle NaN produced by OrdinalEncoder for unknown values if unknown_value=np.nan was used
-            # This would typically be followed by an imputer if NaNs are not desired.
-            # For example, if unknown_value=np.nan, you might want to fill these NaNs:
-            # for col in vars_to_encode:
-            #     if X_transformed[col].isnull().any():
-            #         X_transformed[col] = X_transformed[col].fillna(-1) # Or some other placeholder
-
-
-        logger.debug(f"Encoding applied to variables: {vars_to_encode}")
-        return X_transformed
-
-
-class LogTransformer(BaseEstimator, TransformerMixin):
-    """
-    Applies a logarithmic transformation (log1p) to specified numerical columns
-    to handle skewed data.
-    """
-    def __init__(self, variables: Optional[List[str]] = None):
-        """
-        Args:
-            variables (Optional[List[str]]): List of numerical column names to transform.
-                                             If None, will apply to all numerical columns.
-        """
-        self.variables = variables
-
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-
-        if self.variables is None:
-            self.variables_ = X.select_dtypes(include=np.number).columns.tolist()
+def _handle_loan_columns(df: pd.DataFrame, loan_cols_config: dict) -> pd.DataFrame:
+    """Handles missing (NaN) and 'unknown' string values in loan columns by mapping them to a specified category."""
+    logger.debug(f"Handling missing/unknown in loan columns: {list(loan_cols_config.keys())}")
+    for col, replacement_value in loan_cols_config.items():
+        if col in df.columns:
+            # Ensure column is string type for consistent 'unknown' string handling
+            # Fill NaNs with the string 'nan_temp_marker' to differentiate from actual "unknown" strings before lowercasing
+            df[col] = df[col].fillna('nan_temp_marker')
+            df[col] = df[col].astype(str).str.lower().str.strip()
+            
+            # Map both original 'unknown' strings and NaNs (now 'nan_temp_marker') to the target replacement_value
+            condition = (df[col] == 'unknown') | (df[col] == 'nan_temp_marker')
+            num_affected = df[condition].shape[0]
+            if num_affected > 0:
+                 logger.info(f"Mapping {num_affected} NaN or 'unknown' string values in '{col}' to '{replacement_value}'.")
+            df.loc[condition, col] = replacement_value.lower().strip()
+           
         else:
-            self.variables_ = [var for var in self.variables if var in X.columns]
-            if not self.variables_:
-                 logger.warning(f"None of the specified variables {self.variables} found for LogTransformer.")
-                 return self
-            if not all(pd.api.types.is_numeric_dtype(X[var]) for var in self.variables_):
-                non_numeric_vars = [var for var in self.variables_ if not pd.api.types.is_numeric_dtype(X[var])]
-                raise TypeError(f"All 'variables' for LogTransformer must be numeric. Non-numeric: {non_numeric_vars}")
+            logger.warning(f"Loan column '{col}' for missing/unknown handling not found. Skipping.")
+    return df
 
-        if not self.variables_:
-             logger.warning("No variables selected for LogTransformer.")
-             return self
+def _preprocess_campaign_calls(df: pd.DataFrame, campaign_calls_config: dict) -> pd.DataFrame:
+    """Handles negative values in 'campaign_calls' and creates an indicator column."""
+    original_col = campaign_calls_config.get('original_col', 'campaign_calls')
+    indicator_col = campaign_calls_config.get('negative_adjustment_indicator_col', 'cc_had_negative_adjustment')
 
-        # Check for non-positive values if using np.log, np.log1p handles X=0 by returning 0.
-        # For X < 0, np.log1p will produce NaNs or errors.
-        # It's assumed data is already non-negative or pre-processed for log transform.
-        for var in self.variables_:
-            if (X[var] < 0).any():
-                logger.warning(f"Variable '{var}' contains negative values. "
-                                "LogTransformer (np.log1p) will produce NaNs for values < -1. "
-                                "Ensure data is non-negative or appropriately pre-processed.")
-        logger.info(f"LogTransformer 'fitted' (initialized) for variables: {self.variables_}")
-        return self
+    if original_col not in df.columns:
+        logger.warning(f"Campaign calls column '{original_col}' not found. Skipping its preprocessing.")
+        return df
 
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
-        if not hasattr(self, 'variables_') or not self.variables_:
-            logger.warning("LogTransformer is not fitted or no variables to transform.")
-            return X.copy()
-
-        X_transformed = X.copy()
-        vars_to_transform = [var for var in self.variables_ if var in X_transformed.columns]
-        if not vars_to_transform:
-            logger.warning(f"None of the fitted variables {self.variables_} are present in the input DataFrame for LogTransformer transform.")
-            return X_transformed
-
-        for var in vars_to_transform:
-            if (X_transformed[var] < 0).any(): # Re-check at transform time for safety
-                 logger.warning(f"Transforming variable '{var}' which contains negative values with np.log1p. NaNs may result for x < -1.")
-            X_transformed[var] = np.log1p(X_transformed[var])
-        logger.debug(f"Log transformation (np.log1p) applied to variables: {vars_to_transform}")
-        return X_transformed
-
-
-class ColumnDropper(BaseEstimator, TransformerMixin):
-    """
-    Drops specified columns from a DataFrame.
-    """
-    def __init__(self, variables_to_drop: List[str]):
-        """
-        Args:
-            variables_to_drop (List[str]): A list of column names to drop.
-        """
-        if not isinstance(variables_to_drop, list) or not all(isinstance(col, str) for col in variables_to_drop):
-            raise ValueError("variables_to_drop must be a list of strings.")
-        self.variables_to_drop = variables_to_drop
-
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
-        """No fitting required for this transformer."""
-        # Can add a check here if all variables_to_drop are in X.columns,
-        # though transform will handle it with errors='ignore'.
-        self.fitted_variables_to_drop_ = [col for col in self.variables_to_drop if col in X.columns]
-        logger.info(f"ColumnDropper 'fitted'. Will attempt to drop: {self.fitted_variables_to_drop_}")
-        return self
-
-    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """
-        Transforms the DataFrame by dropping the specified columns.
-        Args:
-            X (pd.DataFrame): The input DataFrame.
-        Returns:
-            pd.DataFrame: A DataFrame with the specified columns removed.
-        """
-        if not isinstance(X, pd.DataFrame):
-            raise TypeError("Input X must be a pandas DataFrame.")
+    # Ensure numeric, coercing errors. This handles if column was read as object.
+    df[original_col] = pd.to_numeric(df[original_col], errors='coerce')
+    
+    nan_before_abs = df[original_col].isna().sum()
+    
+    # Create indicator for negative values (before abs())
+    # Consider NaNs as not having a negative adjustment
+    df[indicator_col] = np.where(df[original_col] < 0, True, False)
+    df.loc[df[original_col].isna(), indicator_col] = False # NaNs did not have negative adjustment
+    
+    negative_count = (df[original_col] < 0).sum()
+    if negative_count > 0:
+        logger.info(f"Found {negative_count} negative values in '{original_col}'. Taking absolute values and created '{indicator_col}'.")
+    
+    df[original_col] = df[original_col].abs()
+    
+    # Handle NaNs that might have been coerced or were original (impute with median of absolute values)
+    # It's better to handle NaNs here if they can occur to prevent issues downstream.
+    # PRD does not specify imputation for campaign_calls, but it's safer.
+    # Using median of non-NaN absolute values.
+    if df[original_col].isna().sum() > 0 :
+        median_calls = df[original_col].median()
+        if pd.isna(median_calls): median_calls = 0 # Fallback if all are NaN
+        logger.info(f"Found {df[original_col].isna().sum()} NaN values in '{original_col}' after abs(). Imputing with median: {median_calls}.")
+        df[original_col] = df[original_col].fillna(median_calls)
         
-        # Only drop columns that actually exist to avoid KeyError
-        cols_to_drop_present = [col for col in self.variables_to_drop if col in X.columns]
-        if not cols_to_drop_present:
-            logger.warning(f"None of the specified columns to drop {self.variables_to_drop} exist in the DataFrame.")
-            return X.copy()
+    logger.info(f"Processed '{original_col}': negatives handled, '{indicator_col}' created.")
+    return df
 
-        X_transformed = X.drop(columns=cols_to_drop_present, errors='ignore')
-        logger.debug(f"Columns dropped: {cols_to_drop_present}")
-        return X_transformed
+def _preprocess_previous_contact_days(df: pd.DataFrame, prev_contact_config: dict) -> pd.DataFrame:
+    """Handles special value 999 in 'previous_contact_days', creates 'previously_contacted' indicator."""
+    original_col = prev_contact_config.get('original_col', 'previous_contact_days')
+    special_value = prev_contact_config.get('special_value_no_contact', 999)
+    indicator_col = prev_contact_config.get('previously_contacted_indicator_col', 'previously_contacted')
+    replacement_val = prev_contact_config.get('value_for_no_contact_after_indicator', 0)
+
+    if original_col not in df.columns:
+        logger.warning(f"Previous contact days column '{original_col}' not found. Skipping its preprocessing.")
+        return df
+    
+    # Ensure numeric, coercing errors
+    df[original_col] = pd.to_numeric(df[original_col], errors='coerce')
+    
+    # Create 'previously_contacted' indicator
+    # True if not special_value AND not NaN. False if special_value. False if NaN (treat NaN as not previously contacted for indicator)
+    df[indicator_col] = np.where(
+        (df[original_col] != special_value) & (df[original_col].notna()), 
+        True, 
+        False
+    )
+    
+    count_999 = (df[original_col] == special_value).sum()
+    logger.info(f"Created '{indicator_col}' based on '{original_col}' (special value {special_value}).")
+    
+    # Replace special_value (e.g., 999) with another value (e.g., 0 or NaN) as per DS-FE-001
+    # "Replace 999 with 0 after creation of new feature."
+    if count_999 > 0:
+        logger.info(f"Replacing {count_999} occurrences of {special_value} in '{original_col}' with {replacement_val}.")
+    df.loc[df[original_col] == special_value, original_col] = replacement_val
+    
+    # Handle original NaNs in 'previous_contact_days' if any, after 999 replacement.
+    # PRD DS-FE-001 "For clients who were previously contacted, this feature is numeric (days). Replace 999 with 0"
+    # This implies if it was NaN originally, and indicator is False, it should probably be 0 as well, or handled carefully.
+    # If it was NaN and indicator is False, let's set it to `replacement_val` too.
+    nan_mask = df[original_col].isna()
+    if nan_mask.sum() > 0:
+        logger.info(f"Found {nan_mask.sum()} NaN values in '{original_col}'. Setting to {replacement_val} as they are also 'not previously contacted'.")
+        df.loc[nan_mask, original_col] = replacement_val
+
+    logger.info(f"Processed '{original_col}': '{indicator_col}' created, special value {special_value} handled.")
+    return df
+
+def _encode_target_variable(df: pd.DataFrame, target_col: str, encoding_map: dict) -> pd.DataFrame:
+    """Encodes the target variable using the provided mapping."""
+    if target_col not in df.columns:
+        logger.warning(f"Target column '{target_col}' not found. Skipping target encoding.")
+        return df
+    
+    # Standardize target column values before mapping (e.g. lowercase, strip)
+    # This is important if raw data isn't perfectly clean e.g. "Yes", " no "
+    df[target_col] = df[target_col].astype(str).str.lower().str.strip()
+
+    original_values = df[target_col].unique()
+    df[target_col] = df[target_col].map(encoding_map)
+    
+    if df[target_col].isnull().any():
+        logger.warning(f"NaNs introduced in target column '{target_col}' after mapping. Original values: {original_values}. Map: {encoding_map}. Check data and mapping.")
+        # Decide on a strategy: raise error, fill with a default, or leave as NaN if subsequent steps handle it.
+        # For now, logging a warning. Critical if this happens.
+    logger.info(f"Target variable '{target_col}' encoded using map: {encoding_map}.")
+    return df
+
+def _drop_client_id(df: pd.DataFrame, client_id_col: str) -> pd.DataFrame:
+    """Drops the client_id column if it exists."""
+    if client_id_col in df.columns:
+        df = df.drop(columns=[client_id_col])
+        logger.info(f"Dropped '{client_id_col}' column.")
+    else:
+        logger.info(f"Client ID column '{client_id_col}' not found for dropping, or not specified.")
+    return df
+
+# --- Main Preprocessing Function ---
+
+def preprocess_data(df: pd.DataFrame, config: dict) -> pd.DataFrame:
+    """
+    Performs data cleaning and preprocessing on the raw DataFrame using configurations.
+
+    Args:
+        df (pd.DataFrame): The raw input DataFrame.
+        config (dict): The pipeline configuration dictionary.
+
+    Returns:
+        pd.DataFrame: The preprocessed DataFrame.
+    """      
+    logger.info("Starting data preprocessing...")
+    df_processed = df.copy()
+
+    # Step 1: Standardize column names (FR-DP-001)
+    # This is crucial as config keys often assume standardized column names.
+    df_processed = _standardize_column_names(df_processed)
+    
+    # Subsequent steps use config keys that should match standardized column names in the DataFrame.
+
+    # Step 2: Handle 'age' (FR-DP-002, DS-ANO-001)
+    if 'age_processing' in config:
+        df_processed = _preprocess_age(df_processed, config['age_processing'])
+    else:
+        logger.warning("Age processing configuration not found. Skipping age preprocessing.")
+
+    # Step 3: Standardize categorical string values (FR-DP-003, FR-DP-004)
+    df_processed = _standardize_categorical_strings(
+        df_processed,
+        config.get('categorical_cols_to_standardize', []),
+        config.get('contact_method_consolidation', {})
+    )
+
+    # Step 4: Handle missing and "unknown" in loan columns (FR-DP-005, DS-MVH-001, DS-MVH-002)
+    if 'loan_cols_missing_handling' in config:
+        df_processed = _handle_loan_columns(df_processed, config['loan_cols_missing_handling'])
+    else:
+        logger.warning("Loan columns missing handling configuration not found. Skipping.")
+
+    # Step 5: Handle 'campaign_calls' (FR-DP-006, DS-ANO-002)
+    if 'campaign_calls_processing' in config:
+        df_processed = _preprocess_campaign_calls(df_processed, config['campaign_calls_processing'])
+    else:
+        logger.warning("Campaign calls processing configuration not found. Skipping.")
+    
+    # Step 6: Handle 'previous_contact_days' (FR-DP-007, FR-FE-001 part, DS-FE-001)
+    if 'previous_contact_days_processing' in config:
+        df_processed = _preprocess_previous_contact_days(df_processed, config['previous_contact_days_processing'])
+    else:
+        logger.warning("Previous contact days processing configuration not found. Skipping.")
+
+    # Step 7: Encode target variable (FR-DP-008)
+    target_col = config.get('target_column') # Assumes this key in config matches standardized name
+    encoding_map = config.get('target_variable_encoding')
+    if target_col and encoding_map: # target_col should now be 'subscription_status'
+        df_processed = _encode_target_variable(df_processed, target_col, encoding_map)
+    else:
+        logger.warning(f"Target column '{target_col}' or encoding map not fully specified in config. Skipping target encoding.")
+        if target_col and target_col not in df_processed.columns:
+             logger.warning(f"Target column '{target_col}' (expected standardized) not found in DataFrame columns: {df_processed.columns.tolist()}")
 
 
-if __name__ == '__main__':
-    # Example Usage (assumes DataFrame with mixed types and NaNs)
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    logger.info("Starting preprocessing transformers example...")
+    # Step 8: Drop client_id (FR-FE-005)
+    client_id_col = config.get('client_id_column') # Assumes this key in config matches standardized name
+    if client_id_col: # client_id_col should now be 'client_id'
+        df_processed = _drop_client_id(df_processed, client_id_col)
+    else:
+        logger.info("Client ID column for dropping not specified in config.")
 
-    data = {
-        'numeric_col1': [1, 2, np.nan, 4, 5, 1000],
-        'numeric_col2': [np.nan, 0.5, 0.1, 0.8, 0.2, 0.9],
-        'skewed_col': [1, 10, 100, 1000, 10000, 100000], # For log transform
-        'categorical_col1': ['A', 'B', 'A', np.nan, 'C', 'B'],
-        'categorical_col2': ['X', 'Y', 'Y', 'X', np.nan, 'Z'],
-        'to_drop': [1,2,3,4,5,6]
-    }
-    sample_df = pd.DataFrame(data)
-    logger.info(f"Original DataFrame:\n{sample_df}\nMissing values:\n{sample_df.isnull().sum()}")
-
-    # --- Test ColumnSelector ---
-    selector = ColumnSelector(columns=['numeric_col1', 'categorical_col1'])
-    selector.fit(sample_df)
-    selected_df = selector.transform(sample_df.copy())
-    logger.info(f"\n--- ColumnSelector output for ['numeric_col1', 'categorical_col1'] ---:\n{selected_df}")
-    try:
-        ColumnSelector(columns=['non_existent_col']).fit(sample_df)
-    except ValueError as e:
-        logger.info(f"Caught expected error for ColumnSelector with non-existent column: {e}")
-
-
-    # --- Test NumericalImputer ---
-    num_imputer = NumericalImputer(strategy='median', variables=['numeric_col1', 'numeric_col2'])
-    num_imputer.fit(sample_df)
-    df_num_imputed = num_imputer.transform(sample_df.copy())
-    logger.info(f"\n--- NumericalImputer (median) output for ['numeric_col1', 'numeric_col2'] ---:\n{df_num_imputed}\nFit params: {num_imputer.fit_params_}")
-
-    # --- Test CategoricalImputer ---
-    cat_imputer = CategoricalImputer(strategy='constant', fill_value='UNKNOWN', variables=['categorical_col1', 'categorical_col2'])
-    cat_imputer.fit(sample_df) # Use df_num_imputed as it might be part of a sequence
-    df_cat_imputed = cat_imputer.transform(df_num_imputed.copy())
-    logger.info(f"\n--- CategoricalImputer (constant='UNKNOWN') output ---:\n{df_cat_imputed}\nFit params: {cat_imputer.fit_params_}")
-
-    # --- Test LogTransformer ---
-    log_transformer = LogTransformer(variables=['skewed_col']) # numeric_col1 also for testing, includes a large value
-    log_transformer.fit(df_cat_imputed)
-    df_log_transformed = log_transformer.transform(df_cat_imputed.copy())
-    logger.info(f"\n--- LogTransformer output for ['skewed_col'] ---:\n{df_log_transformed[['skewed_col']]}")
-    logger.info(f"Value 100000 becomes: {np.log1p(100000)}")
-
-
-    # --- Test SklearnScalerWrapper ---
-    scaler = SklearnScalerWrapper(scaler_type='standard', variables=['numeric_col1', 'numeric_col2', 'skewed_col'])
-    scaler.fit(df_log_transformed) # Use already imputed and transformed data
-    df_scaled = scaler.transform(df_log_transformed.copy())
-    logger.info(f"\n--- SklearnScalerWrapper (standard) output for ['numeric_col1', 'numeric_col2', 'skewed_col_log'] ---:\n{df_scaled[['numeric_col1', 'numeric_col2', 'skewed_col']]}")
-
-
-    # --- Test SklearnEncoderWrapper (OneHot) ---
-    # For encoder, use df_cat_imputed as it has categories filled
-    # and before log transform/scaling on original numeric_col1 for clarity
-    ohe_encoder = SklearnEncoderWrapper(encoder_type='onehot', variables=['categorical_col1', 'categorical_col2'], drop_first_if_onehot=True)
-    ohe_encoder.fit(df_cat_imputed)
-    df_onehot_encoded = ohe_encoder.transform(df_cat_imputed.copy())
-    logger.info(f"\n--- SklearnEncoderWrapper (onehot, drop_first=True) output ---:\n{df_onehot_encoded.head()}")
-    logger.info(f"Encoded feature names: {ohe_encoder.encoded_feature_names_}")
-
-
-    # --- Test SklearnEncoderWrapper (Ordinal) ---
-    ord_encoder = SklearnEncoderWrapper(encoder_type='ordinal', variables=['categorical_col1', 'categorical_col2'])
-    ord_encoder.fit(df_cat_imputed)
-    df_ordinal_encoded = ord_encoder.transform(df_cat_imputed.copy()) # Use df_cat_imputed again for a clean comparison
-    logger.info(f"\n--- SklearnEncoderWrapper (ordinal) output ---:\n{df_ordinal_encoded[['categorical_col1', 'categorical_col2']]}")
-
-    # --- Test ColumnDropper ---
-    col_dropper = ColumnDropper(variables_to_drop=['to_drop', 'non_existent_column'])
-    col_dropper.fit(df_onehot_encoded) # Use any df for this
-    df_dropped = col_dropper.transform(df_onehot_encoded.copy())
-    logger.info(f"\n--- ColumnDropper output (dropping 'to_drop') ---:\n{df_dropped.head()}")
-    logger.info(f"Columns after dropping: {df_dropped.columns.tolist()}")
-
-    logger.info("\nPreprocessing transformers example finished.")
+    logger.info(f"Data preprocessing complete. DataFrame shape after preprocessing: {df_processed.shape}")
+    if not df_processed.empty:
+        logger.debug(f"First 5 rows of preprocessed data:\n{df_processed.head().to_string()}")
+    else:
+        logger.warning("DataFrame is empty after preprocessing.")
+        
+    return df_processed

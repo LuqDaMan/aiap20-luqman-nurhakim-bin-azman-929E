@@ -3,8 +3,11 @@
 venv/
 env/
 
-# Data directory
-data/
+# Data and logs directories
+data/*
+logs/pipeline/*
+plots/*
+
 
 # Python bytecode
 __pycache__/
@@ -22,3 +25,5 @@ build/
 # Local configuration
 .env
 .DS_Store
+
+
