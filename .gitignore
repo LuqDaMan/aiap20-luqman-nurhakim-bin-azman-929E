@@ -5,11 +5,12 @@ env/
 
 # Data and logs directories
 data/*
-logs/pipeline/*
+logs/*
 mlruns/*
 plots/*
 results/*
-
+scripts/*
+tests/*
 
 # Python bytecode
 __pycache__/
