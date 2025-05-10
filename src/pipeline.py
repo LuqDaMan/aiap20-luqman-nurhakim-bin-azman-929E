@@ -2,6 +2,9 @@ import argparse
 import logging
 import sys
 import os
+import mlflow
+import mlflow.sklearn
+import pandas as pd
 from datetime import datetime
 
 from utils import load_config, setup_logging, set_global_random_seed
@@ -25,40 +28,82 @@ def run_pipeline(config_path: str):
         # Load configuration (already done in __main__, but good practice if this function is called elsewhere)
         # For this script, config is loaded in __main__ and passed if run_pipeline was a class method or took config dict
         config = load_config(config_path) # If not already loaded by main, load it.
+        # MLflow run name (optional, but good for organization)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f"{config.get('project_name', 'MLPipelineRun')}_{timestamp}"
 
-        # Initial setup steps (logging and random seed are set in __main__ before calling this)
-        logging.info(f"Starting the ML pipeline with configuration from: {config_path}")
-        logging.info(f"Project Name: {config.get('project_name', 'N/A')}, Random Seed: {config.get('random_seed')}")
+        with mlflow.start_run(run_name=run_name) as run:
+            run_id = run.info.run_id
+            logging.info(f"MLflow Run Started: Name='{run_name}', ID='{run_id}'")
+            mlflow.log_param("config_path", config_path) # Log config path
+            mlflow.log_dict(config, "pipeline_config.yaml")
 
-        # --- Step 1: Data Ingestion (FR-DI-001, FR-DI-002) ---
-        logging.info("===== Initiating Data Ingestion =====")
-        raw_df = ingest_data(config['data_source']) 
-        logging.info(f"Data ingestion complete. Initial DataFrame shape: {raw_df.shape}")
+            # --- Step 1: Data Ingestion (FR-DI-001, FR-DI-002) ---
+            logging.info("===== Initiating Data Ingestion =====")
+            raw_df = ingest_data(config['data_source']) 
+            logging.info(f"Data ingestion complete. Initial DataFrame shape: {raw_df.shape}")
 
-        # --- Step 2: Data Cleaning & Preprocessing (FR-DP series) ---
-        logging.info("===== Initiating Data Cleaning & Preprocessing =====")
-        cleaned_df = preprocess_data(raw_df, config) # Replace with actual call
-        logging.info(f"Data cleaning and preprocessing complete. DataFrame shape: {cleaned_df.shape}")
+            # --- Step 2: Data Cleaning & Preprocessing (FR-DP series) ---
+            logging.info("===== Initiating Data Cleaning & Preprocessing =====")
+            cleaned_df = preprocess_data(raw_df, config) # Replace with actual call
+            logging.info(f"Data cleaning and preprocessing complete. DataFrame shape: {cleaned_df.shape}")
 
-        # --- Step 3: Feature Engineering (FR-FE series) & Data Splitting (MD-SPLIT-001) ---
-        logging.info("===== Initiating Feature Engineering & Data Splitting =====")
-        X_train, X_test, y_train, y_test, preprocessor_object = engineer_features_and_split_data(cleaned_df.copy(), config)
-        # Note: You'll need to decide if/how to use/save the 'preprocessor_object'. It's essential for consistent transformation of new data.
-        logging.info("Feature engineering and data splitting complete.")
+            # --- Step 3: Feature Engineering (FR-FE series) & Data Splitting (MD-SPLIT-001) ---
+            logging.info("===== Initiating Feature Engineering & Data Splitting =====")
+            X_train, X_test, y_train, y_test, preprocessor_object = engineer_features_and_split_data(cleaned_df.copy(), config)
+            # Note: You'll need to decide if/how to use/save the 'preprocessor_object'. It's essential for consistent transformation of new data.
+            logging.info("Feature engineering and data splitting complete.")
 
-        # --- Step 4: Model Training & Tuning (FR-MT series, MD series) ---
-        logging.info("===== Initiating Model Training & Tuning =====")
-        trained_models, best_model_name, best_model_object = train_and_tune_models(X_train, y_train, config) 
-        logging.info(f"Model training and tuning complete. Best model identified: {best_model_name}")
+            # --- Step 4: Model Training & Tuning (FR-MT series, MD series) ---
+            logging.info("===== Initiating Model Training & Tuning =====")
+            trained_models, best_model_name, best_model_object = train_and_tune_models(X_train, y_train, config, run_id) 
+            logging.info(f"Model training and tuning complete. Best model identified: {best_model_name}")
 
-        # --- Step 5: Model Evaluation (FR-ME series, MD-EVAL series) ---
-        logging.info(f"===== Initiating Final Evaluation for Best Model: {best_model_name} =====")
-        if best_model_object:
-            # final_evaluation_results = evaluate_final_model(best_model_object, X_test, y_test, config, best_model_name) # Replace
-            final_evaluation_results = evaluate_model_on_test_set(best_model_object, X_test, y_test, best_model_name, config)
-            logging.info(f"Final evaluation for {best_model_name} on test set: {final_evaluation_results}")
+            # --- Step 5: Model Evaluation (FR-ME series, MD-EVAL series) ---
+            logging.info(f"===== Initiating Final Evaluation for Best Model: {best_model_name} =====")
+            all_evaluation_results = [] # To store results for CSV
 
-        logging.info("===== ML Pipeline execution finished successfully. =====")
+            if trained_models:
+                for model_name, model_pipeline in trained_models.items():
+                    if model_pipeline:
+                        logging.info(f"--- Evaluating model: {model_name} on the test set ---")
+                        evaluation_results = evaluate_model_on_test_set(
+                            model_pipeline=model_pipeline,
+                            X_test=X_test,
+                            y_test=y_test,
+                            model_name=model_name,
+                            config=config,
+                            run_id=run_id # Add run_id here if you use it for plot naming within evaluate_model_on_test_set
+                        )
+                        all_evaluation_results.append(evaluation_results)
+                        logging.info(f"Evaluation results for {model_name}: {evaluation_results}")
+                    else:
+                        logging.warning(f"Model pipeline for '{model_name}' is None. Skipping evaluation.")
+            else:
+                logging.error("No models were trained successfully. Skipping evaluation.")
+            
+            if all_evaluation_results:
+                results_df = pd.DataFrame(all_evaluation_results)
+                
+                # Ensure results directory exists
+                results_dir = config.get("output_paths", {}).get("results_dir", "results/")
+                os.makedirs(results_dir, exist_ok=True)
+
+                # Create a run-specific CSV filename
+                results_filename = f"evaluation_metrics_run_{run_id}.csv" 
+                results_csv_path = os.path.join(results_dir, results_filename)
+                
+                try:
+                    results_df.to_csv(results_csv_path, index=False)
+                    logging.info(f"All model evaluation results saved to: {results_csv_path}")
+                    mlflow.log_artifact(results_csv_path, artifact_path="results") 
+                except Exception as e:
+                    logging.error(f"Failed to save evaluation results CSV: {e}")
+            else:
+                logging.info("No evaluation results to save to CSV.")
+
+            logging.info(f"MLflow Run Ended: ID='{run_id}'")
+            logging.info("===== ML Pipeline execution finished successfully. =====")
 
     except FileNotFoundError:
         logging.critical(f"Configuration file not found at {config_path}. Pipeline aborted.")

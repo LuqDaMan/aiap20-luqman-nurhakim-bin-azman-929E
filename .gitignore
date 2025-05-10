@@ -6,7 +6,9 @@ env/
 # Data and logs directories
 data/*
 logs/pipeline/*
+mlruns/*
 plots/*
+results/*
 
 
 # Python bytecode

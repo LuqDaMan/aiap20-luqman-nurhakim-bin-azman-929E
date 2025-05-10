@@ -19,9 +19,9 @@ data_source:
 
 output_paths:
   log_file: "logs/pipeline.log"
-  model_dir: "models/" # Example: if saving models
-  results_file: "results/evaluation_metrics.csv" # Example: if saving detailed results
-  plots_dir: "plots/" # Example: if saving plots like ROC curve
+  model_dir: "models/" 
+  results_dir: "results/" 
+  plots_dir: "plots/" 
 
 # --- Feature Definitions & Preprocessing ---
 target_column: "subscription_status" # Standardized from 'Subscription Status'

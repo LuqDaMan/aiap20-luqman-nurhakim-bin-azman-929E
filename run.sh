@@ -28,6 +28,7 @@ echo "Current time: $(date)"
 echo "===================================================="
 echo
 
+export MLFLOW_TRACKING_URI=http://localhost:5001
 PYTHON_COMMAND="python3 src/pipeline.py --config ${CONFIG_PATH}"
 
 # Execute the command
