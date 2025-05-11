@@ -6,6 +6,7 @@ import sys
 import random
 import numpy as np
 from logging.handlers import RotatingFileHandler
+from datetime import datetime
 
 
 def load_config(config_path: str = "config/pipeline_config.yaml") -> dict:
@@ -23,7 +24,7 @@ def load_config(config_path: str = "config/pipeline_config.yaml") -> dict:
         yaml.YAMLError: If there's an error parsing the YAML file.
     """
     try:
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
         logging.info(f"Configuration loaded successfully from {config_path}")
         return config
@@ -37,80 +38,130 @@ def load_config(config_path: str = "config/pipeline_config.yaml") -> dict:
         logging.error(f"An unexpected error occurred while loading config from {config_path}: {e}")
         raise
 
-def setup_logging(config: dict, logger_name: str = None) -> logging.Logger:
+def setup_logging(
+    logger_specific_config: dict,
+    common_logging_config: dict,
+) -> logging.Logger:
     """
-    Sets up logging for the pipeline based on the configuration.
-    Logs to both console and a file with rotation support.
-    
+    Sets up a specific logger based on the provided configurations.
+    Logs to both console and a rotating file with optional timestamp in filename.
+
     Args:
-        config (dict): The pipeline configuration dictionary.
-                       Expected keys:
-                       - 'logging' containing:
-                           - 'level' (e.g., "INFO", "DEBUG")
-                           - 'file' (path to the log file)
-                           - 'format' (optional log format)
-                           - 'max_size_mb' (optional, max log file size in MB)
-                           - 'backup_count' (optional, number of backup files)
-        logger_name (str, optional): Name for the logger. If None, uses root logger.
-    
+        logger_specific_config (dict): Configuration specific to this logger.
+            Expected keys:
+            - 'logger_name' (str): Name for the logger.
+            - 'level' (str, e.g., "INFO", "DEBUG"): Logging level.
+            - 'log_dir' (str): Directory to store log files.
+            - 'log_file_base_name' (str): Base name for the log file.
+        common_logging_config (dict): Common logging configurations.
+            Expected keys:
+            - 'format' (str): Log format string.
+            - 'date_format' (str, optional): Date format for log messages.
+            - 'timestamp_log_files' (bool, optional): If True, appends a timestamp to log filenames.
+            - 'max_size_bytes' (int, optional): Max log file size in bytes for rotation.
+            - 'backup_count' (int, optional): Number of backup log files for rotation.
+
     Returns:
-        logging.Logger: Configured logger
+        logging.Logger: Configured logger.
+
+    Raises:
+        ValueError: If essential configuration keys are missing.
     """
     try:
-        # Extract config values with sensible defaults
-        log_config = config.get('logging', {})
-        log_level_str = log_config.get('level', 'DEBUG').upper()
-        log_file_path = log_config.get('file')
-        log_format_str = log_config.get('format', 
-                                       '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        max_size_mb = log_config.get('max_size_mb', 10)
-        backup_count = log_config.get('backup_count', 3)
-        
-        # Get log level
-        log_level = getattr(logging, log_level_str, logging.DEBUG)
-        
-        # Get logger (root or named)
+        # Extract logger-specific config values
+        logger_name = logger_specific_config.get('logger_name')
+        if not logger_name:
+            raise ValueError("'logger_name' is not specified in logger_specific_config.")
+
+        log_level_str = logger_specific_config.get('level', 'INFO').upper()
+        log_dir = logger_specific_config.get('log_dir')
+        if not log_dir:
+            raise ValueError(f"'log_dir' is not specified for logger '{logger_name}'.")
+        log_file_base_name = logger_specific_config.get('log_file_base_name')
+        if not log_file_base_name:
+            raise ValueError(f"'log_file_base_name' is not specified for logger '{logger_name}'.")
+
+        # Extract common logging config values
+        log_format_str = common_logging_config.get(
+            'format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        date_format_str = common_logging_config.get('date_format', '%Y-%m-%d %H:%M:%S')
+        timestamp_log_files = common_logging_config.get('timestamp_log_files', False)
+        max_bytes = common_logging_config.get('max_size_bytes', 10 * 1024 * 1024)  # Default 10MB
+        backup_count = common_logging_config.get('backup_count', 3)
+
+        # Get log level from logging module
+        log_level = getattr(logging, log_level_str, logging.INFO)
+
+        # Get the named logger instance
         logger = logging.getLogger(logger_name)
-        logger.setLevel(log_level)
-        
-        # Clear existing handlers
+        logger.setLevel(log_level) # Set level for the logger
+
+        # Clear existing handlers to prevent duplicate logging if re-configured
         if logger.hasHandlers():
             logger.handlers.clear()
         
+        # Propagate logs to parent loggers or not. Default is True.
+        # For application specific loggers, you might want to set this to False
+        # if you have a root logger also configured and want to avoid duplicate messages.
+        # For now, we keep the default (True).
+        # logger.propagate = False
+
         # Create formatter
-        formatter = logging.Formatter(log_format_str)
-        
+        formatter = logging.Formatter(log_format_str, datefmt=date_format_str)
+
         # Console handler
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
+        console_handler.setLevel(log_level) # Handler level can also be set
         logger.addHandler(console_handler)
+
+        # File handler (with rotation and optional timestamp)
+        os.makedirs(log_dir, exist_ok=True) # Ensure log directory exists
+
+        if timestamp_log_files:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base, ext = os.path.splitext(log_file_base_name)
+            log_file_name = f"{base}_{timestamp}{ext}"
+        else:
+            log_file_name = log_file_base_name
         
-        # File handler (with rotation)
-        if log_file_path:
-            # Create log directory if needed
-            os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-            
-            # Set up rotating file handler
-            file_handler = RotatingFileHandler(
-                log_file_path,
-                maxBytes=max_size_mb * 1024 * 1024,  # Convert MB to bytes
-                backupCount=backup_count,
-                mode='a'
-            )
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-        
-        logger.info(f"Logging setup complete. Level: {log_level_str}. "
-                   f"Log file: {log_file_path if log_file_path else 'None'}")
+        log_file_path = os.path.join(log_dir, log_file_name)
+
+        # Set up rotating file handler
+        file_handler = RotatingFileHandler(
+            log_file_path,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            mode='a', # Append mode
+            encoding='utf-8' # Specify encoding
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(log_level) # Handler level
+        logger.addHandler(file_handler)
+
+        logger.info(
+            f"Logging for '{logger_name}' setup complete. Level: {log_level_str}. "
+            f"Log file: {log_file_path}"
+        )
         return logger
-        
+
     except Exception as e:
-        # Fallback to basic logging if setup fails
-        logging.basicConfig(level=logging.INFO, 
-                           format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        logger = logging.getLogger(logger_name)
-        logger.error(f"Error setting up custom logging: {e}. Falling back to basicConfig.")
-        print(f"CRITICAL: Error setting up logging: {e}", file=sys.stderr)
+        # Fallback to basic logging configuration if custom setup fails
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s (fallback)',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        # Attempt to use the intended logger name or a default if not available
+        fallback_logger_name = logger_name if 'logger_name' in locals() and logger_name else "utils_fallback_logger"
+        logger = logging.getLogger(fallback_logger_name)
+        
+        error_msg = (f"CRITICAL: Error setting up custom logging for '{fallback_logger_name}': {e}. "
+                     f"Falling back to basicConfig. Some logs may be missed or improperly formatted.")
+        logger.error(error_msg, exc_info=True) # Log with exception info
+        # Also print to stderr as a direct warning to the console user
+        print(error_msg, file=sys.stderr)
         return logger
 
 
