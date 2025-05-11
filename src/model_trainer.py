@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 import mlflow
 import mlflow.sklearn
+from mlflow.models.signature import infer_signature
 from typing import Tuple, Dict, Any # Changed from 'Any' to 'Dict' for type hint clarity
 
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
@@ -145,11 +146,15 @@ def train_and_tune_models(
                 model_best_scores[model_name] = float(grid_search.best_score_) 
                 mlflow.log_metric(f"cv_best_score_{config.get('hyperparameter_tuning', {}).get('scoring_metric_for_tuning', 'f1_yes_scorer')}", grid_search.best_score_)
                 mlflow.log_params(grid_search.best_params_)
+                predictions_proba = grid_search.best_estimator_.predict_proba(input_example)
+                signature = infer_signature(input_example, predictions_proba)
                 mlflow.sklearn.log_model(
                         sk_model=grid_search.best_estimator_,
                         artifact_path=model_name, # This creates a 'models/{model_name}' like structure in MLflow artifacts
                         input_example=input_example,
-                        serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_PICKLE # or CLOUDPICKLE
+                        signature=signature,
+                        pyfunc_predict_fn="predict_proba",
+                        serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_PICKLE 
                     )
                 logger.info(f"Best F1-score (yes class) for {model_name} (from CV): {grid_search.best_score_:.4f}")
                 logger.info(f"Best parameters for {model_name}: {grid_search.best_params_}")

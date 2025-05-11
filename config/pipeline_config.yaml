@@ -21,7 +21,8 @@ output_paths:
   log_file: "logs/pipeline.log"
   model_dir: "models/" 
   results_dir: "results/" 
-  plots_dir: "plots/" 
+  plots_dir: "plots/"
+  artifacts_dir: "artifacts/"
 
 # --- Feature Definitions & Preprocessing ---
 target_column: "subscription_status" # Standardized from 'Subscription Status'

@@ -1,5 +1,6 @@
 import argparse
 import logging
+import joblib
 import sys
 import os
 import mlflow
@@ -31,6 +32,7 @@ def run_pipeline(config_path: str):
         # MLflow run name (optional, but good for organization)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f"{config.get('project_name', 'MLPipelineRun')}_{timestamp}"
+        artifacts_dir = config['output_paths']['artifacts_dir']
 
         with mlflow.start_run(run_name=run_name) as run:
             run_id = run.info.run_id
@@ -51,7 +53,18 @@ def run_pipeline(config_path: str):
             # --- Step 3: Feature Engineering (FR-FE series) & Data Splitting (MD-SPLIT-001) ---
             logging.info("===== Initiating Feature Engineering & Data Splitting =====")
             X_train, X_test, y_train, y_test, preprocessor_object = engineer_features_and_split_data(cleaned_df.copy(), config)
-            # Note: You'll need to decide if/how to use/save the 'preprocessor_object'. It's essential for consistent transformation of new data.
+            os.makedirs(artifacts_dir, exist_ok=True)
+            preprocessor_filename = "preprocessor.joblib"
+            preprocessor_save_path = os.path.join(artifacts_dir, preprocessor_filename)
+            try:
+                joblib.dump(preprocessor_object, preprocessor_save_path)
+                logging.info(f"Preprocessor object saved to: {preprocessor_save_path}")
+                # Log as an MLflow artifact as well, so it's versioned with the run
+                mlflow.log_artifact(preprocessor_save_path, artifact_path="preprocessor_artefact") # artifact_path is a subfolder in MLflow
+            except Exception as e:
+                logging.error(f"Error saving preprocessor object: {e}", exc_info=True)
+                # Decide if this is a critical error that should stop the pipeline
+                # raise # Uncomment to make it critical
             logging.info("Feature engineering and data splitting complete.")
 
             # --- Step 4: Model Training & Tuning (FR-MT series, MD series) ---
@@ -137,8 +150,26 @@ if __name__ == "__main__":
     log_dir = os.path.dirname(log_file_base)
     log_filename = os.path.basename(log_file_base)
     log_name, log_ext = os.path.splitext(log_filename)
-    pipeline_config['logging']['file'] = f"{log_dir}/{log_name}_{timestamp}{log_ext}"
-    setup_logging(pipeline_config, 'pipeline') # This sets up the global logger
+    log_file_with_timestamp = f"{log_dir}/{log_name}_{timestamp}{log_ext}"
+
+    # Create the two dictionaries that setup_logging expects
+    logger_specific_config = {
+        'logger_name': 'pipeline',  # The name you want for your logger
+        'level': pipeline_config.get('logging', {}).get('level', 'INFO'),
+        'log_dir': log_dir,
+        'log_file_base_name': f"{log_name}_{timestamp}{log_ext}"  # Just the filename part
+    }
+
+    common_logging_config = {
+        'format': pipeline_config.get('logging', {}).get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'),
+        'date_format': pipeline_config.get('logging', {}).get('date_format', '%Y-%m-%d %H:%M:%S'),
+        'timestamp_log_files': False,  # We've already added timestamp to the filename
+        'max_size_bytes': pipeline_config.get('logging', {}).get('max_size_bytes', 10 * 1024 * 1024),
+        'backup_count': pipeline_config.get('logging', {}).get('backup_count', 3)
+    }
+
+    # Call setup_logging with the properly structured arguments
+    logger = setup_logging(logger_specific_config, common_logging_config)
 
     # 3. Set global random seed for reproducibility (FR-MT-004)
     set_global_random_seed(pipeline_config.get("random_seed", 42)) # Default to 42 if not in config
