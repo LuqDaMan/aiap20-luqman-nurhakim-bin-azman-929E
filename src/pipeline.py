@@ -7,7 +7,7 @@ import mlflow.sklearn
 import pandas as pd
 from datetime import datetime
 
-from utils import load_config, setup_logging, set_global_random_seed
+from utils.pipe_utils import load_config, setup_logging, set_global_random_seed
 
 from data_ingestion import ingest_data
 from preprocessing import preprocess_data
