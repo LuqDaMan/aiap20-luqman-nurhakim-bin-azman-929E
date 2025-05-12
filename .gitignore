@@ -10,7 +10,6 @@ logs/*
 mlruns/*
 plots/*
 results/*
-scripts/*
 tests/*
 
 

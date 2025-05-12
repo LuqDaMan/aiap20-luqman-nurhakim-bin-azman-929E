@@ -40,17 +40,17 @@ def run_pipeline(config_path: str):
             mlflow.log_param("config_path", config_path) # Log config path
             mlflow.log_dict(config, "pipeline_config.yaml")
 
-            # --- Step 1: Data Ingestion (FR-DI-001, FR-DI-002) ---
+            # --- Step 1: Data Ingestion ---
             logging.info("===== Initiating Data Ingestion =====")
             raw_df = ingest_data(config['data_source']) 
             logging.info(f"Data ingestion complete. Initial DataFrame shape: {raw_df.shape}")
 
-            # --- Step 2: Data Cleaning & Preprocessing (FR-DP series) ---
+            # --- Step 2: Data Cleaning & Preprocessing ---
             logging.info("===== Initiating Data Cleaning & Preprocessing =====")
             cleaned_df = preprocess_data(raw_df, config) # Replace with actual call
             logging.info(f"Data cleaning and preprocessing complete. DataFrame shape: {cleaned_df.shape}")
 
-            # --- Step 3: Feature Engineering (FR-FE series) & Data Splitting (MD-SPLIT-001) ---
+            # --- Step 3: Feature Engineering & Data Splitting ---
             logging.info("===== Initiating Feature Engineering & Data Splitting =====")
             X_train, X_test, y_train, y_test, preprocessor_object = engineer_features_and_split_data(cleaned_df.copy(), config)
             os.makedirs(artifacts_dir, exist_ok=True)
@@ -67,12 +67,12 @@ def run_pipeline(config_path: str):
                 # raise # Uncomment to make it critical
             logging.info("Feature engineering and data splitting complete.")
 
-            # --- Step 4: Model Training & Tuning (FR-MT series, MD series) ---
+            # --- Step 4: Model Training & Tuning ---
             logging.info("===== Initiating Model Training & Tuning =====")
             trained_models, best_model_name, best_model_object = train_and_tune_models(X_train, y_train, config, run_id) 
             logging.info(f"Model training and tuning complete. Best model identified: {best_model_name}")
 
-            # --- Step 5: Model Evaluation (FR-ME series, MD-EVAL series) ---
+            # --- Step 5: Model Evaluation ---
             logging.info(f"===== Initiating Final Evaluation for Best Model: {best_model_name} =====")
             all_evaluation_results = [] # To store results for CSV
 
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # Call setup_logging with the properly structured arguments
     logger = setup_logging(logger_specific_config, common_logging_config)
 
-    # 3. Set global random seed for reproducibility (FR-MT-004)
+    # 3. Set global random seed for reproducibility
     set_global_random_seed(pipeline_config.get("random_seed", 42)) # Default to 42 if not in config
 
     # 4. Run the main pipeline

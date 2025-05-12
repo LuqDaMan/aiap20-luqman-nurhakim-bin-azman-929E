@@ -77,7 +77,7 @@ def _standardize_categorical_strings(df: pd.DataFrame, cat_cols_config: list, co
                     df[col] = df[col].replace(K, V)
                 logger.info(f"Consolidated values in 'contact_method' using mapping: {contact_method_config}")
             
-            # FR-DP-004: "unknown" string values are standardized here. Their treatment as a distinct category happens in encoding.
+            # "unknown" string values are standardized here. Their treatment as a distinct category happens in encoding.
             logger.debug(f"Standardized categorical column: '{col}'. 'unknown' values standardized if present.")
         else:
             logger.warning(f"Categorical column '{col}' for standardization not found in DataFrame. Skipping.")
@@ -230,44 +230,44 @@ def preprocess_data(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     logger.info("Starting data preprocessing...")
     df_processed = df.copy()
 
-    # Step 1: Standardize column names (FR-DP-001)
+    # Step 1: Standardize column names
     # This is crucial as config keys often assume standardized column names.
     df_processed = _standardize_column_names(df_processed)
     
     # Subsequent steps use config keys that should match standardized column names in the DataFrame.
 
-    # Step 2: Handle 'age' (FR-DP-002, DS-ANO-001)
+    # Step 2: Handle 'age'
     if 'age_processing' in config:
         df_processed = _preprocess_age(df_processed, config['age_processing'])
     else:
         logger.warning("Age processing configuration not found. Skipping age preprocessing.")
 
-    # Step 3: Standardize categorical string values (FR-DP-003, FR-DP-004)
+    # Step 3: Standardize categorical string values
     df_processed = _standardize_categorical_strings(
         df_processed,
         config.get('categorical_cols_to_standardize', []),
         config.get('contact_method_consolidation', {})
     )
 
-    # Step 4: Handle missing and "unknown" in loan columns (FR-DP-005, DS-MVH-001, DS-MVH-002)
+    # Step 4: Handle missing and "unknown" in loan columns
     if 'loan_cols_missing_handling' in config:
         df_processed = _handle_loan_columns(df_processed, config['loan_cols_missing_handling'])
     else:
         logger.warning("Loan columns missing handling configuration not found. Skipping.")
 
-    # Step 5: Handle 'campaign_calls' (FR-DP-006, DS-ANO-002)
+    # Step 5: Handle 'campaign_calls'
     if 'campaign_calls_processing' in config:
         df_processed = _preprocess_campaign_calls(df_processed, config['campaign_calls_processing'])
     else:
         logger.warning("Campaign calls processing configuration not found. Skipping.")
     
-    # Step 6: Handle 'previous_contact_days' (FR-DP-007, FR-FE-001 part, DS-FE-001)
+    # Step 6: Handle 'previous_contact_days'
     if 'previous_contact_days_processing' in config:
         df_processed = _preprocess_previous_contact_days(df_processed, config['previous_contact_days_processing'])
     else:
         logger.warning("Previous contact days processing configuration not found. Skipping.")
 
-    # Step 7: Encode target variable (FR-DP-008)
+    # Step 7: Encode target variable
     target_col = config.get('target_column') # Assumes this key in config matches standardized name
     encoding_map = config.get('target_variable_encoding')
     if target_col and encoding_map: # target_col should now be 'subscription_status'
@@ -278,7 +278,7 @@ def preprocess_data(df: pd.DataFrame, config: dict) -> pd.DataFrame:
              logger.warning(f"Target column '{target_col}' (expected standardized) not found in DataFrame columns: {df_processed.columns.tolist()}")
 
 
-    # Step 8: Drop client_id (FR-FE-005)
+    # Step 8: Drop client_id
     client_id_col = config.get('client_id_column') # Assumes this key in config matches standardized name
     if client_id_col: # client_id_col should now be 'client_id'
         df_processed = _drop_client_id(df_processed, client_id_col)

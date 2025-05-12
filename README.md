@@ -289,7 +289,7 @@ These three models provide a good spectrum from simple/interpretable (Logistic R
 ## 7. Model Evaluation and Metrics
 Model evaluation is critical, especially given the business goal of identifying clients likely to subscribe ('yes' class) and the inherent class imbalance in the dataset (~11% 'yes').
 
-**Evaluation Metrics Used (ME-001, MD-EVAL-001):**
+**Evaluation Metrics Used:**
 
 *   **F1-score (for 'yes' class):**
     *   **Explanation:** This is the harmonic mean of Precision and Recall for the positive class ('yes'). It's the primary metric for model selection because it provides a balance between correctly identifying subscribers (Recall) and ensuring that those predicted as subscribers are indeed subscribers (Precision). This is crucial when the cost of missing a potential subscriber (false negative) and the cost of incorrectly targeting a non-subscriber (false positive) both need to be considered.

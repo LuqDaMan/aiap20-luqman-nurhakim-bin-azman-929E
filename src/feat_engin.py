@@ -136,7 +136,7 @@ def engineer_features_and_split_data(
     )
     # Setting verbose_feature_names_out=False makes get_feature_names_out() simpler.
 
-    # Split data (MD-SPLIT-001) BEFORE fitting the preprocessor
+    # Split data BEFORE fitting the preprocessor
     split_config = config.get('train_test_split', {})
     test_size = split_config.get('test_size', 0.2)
     stratify_target = split_config.get('stratify_by_target', True)

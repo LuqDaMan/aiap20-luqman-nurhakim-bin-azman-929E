@@ -82,7 +82,7 @@ async def health_check():
     )
 
 @app.post(
-    "/predict/", # FR-DEP-004
+    "/predict/",
     response_model=PredictionOutput,
     tags=["Prediction"],
     summary="Predict Term Deposit Subscription",
@@ -92,7 +92,7 @@ async def health_check():
     )
 )
 async def predict_subscription(
-    request: PredictionRequest, # FR-DEP-004a, FR-DEP-004c (model_name in body)
+    request: PredictionRequest,
     http_request: FastAPIRequest # For logging client info if needed
 ):
     """
@@ -141,7 +141,6 @@ async def predict_subscription(
     # --- End preprocessing call ---
 
     # Call the MLflow model serving endpoint via the utility function
-    # FR-DEP-006: FastAPI application MUST correctly route requests...
     API_LOGGER.info(f"Sending processed data to MLflow model '{model_identifier}'.")
     mlflow_response, error_message = await call_mlflow_predict_endpoint(
         model_identifier=model_identifier,
@@ -163,11 +162,10 @@ async def predict_subscription(
         )
 
     # Process the successful MLflow prediction response
-    # FR-DEP-005: The prediction endpoint MUST return the prediction result.
     try:
         # Assuming MLflow for sklearn returns: {"predictions": [[prob_class_0, prob_class_1]]}
         # or {"predictions": [class_label_numeric]} if probabilities are not directly output
-        # For PRD_II, we need both class and probability (FR-DEP-005a, FR-DEP-005b)
+        # we need both class and probability
         
         predictions_data = mlflow_response.get("predictions")
         API_LOGGER.info(f"MLflow response 'predictions' field: {predictions_data}")
@@ -210,7 +208,6 @@ async def predict_subscription(
             raise ValueError(f"Cannot map numeric label '{predicted_label_numeric}' to string class. Check 'class_labels' in config.")
 
         # Construct and return the response
-        # FR-DEP-005c: Structured response (e.g., JSON) - Pydantic handles this.
         response_payload = PredictionOutput(
             model_used=model_identifier,
             predicted_class=predicted_class_str,
