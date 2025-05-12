@@ -178,7 +178,7 @@ The `run.sh` script orchestrates the training pipeline defined in `src/pipeline.
        |
        V
 [3. Feature Engineering & Data Splitting (src/feat_engin.py)]
-   - Creates new binary features ('previously_contacted', 'cc_had_negative_adjustment') as per PRD.
+   - Creates new binary features ('previously_contacted', 'cc_had_negative_adjustment').
    - Applies transformations:
      - Log transform for skewed numerical features ('campaign_calls', 'previous_contact_days').
      - Standard scaling for all numerical features.
@@ -254,7 +254,7 @@ Exploratory Data Analysis (EDA) was conducted on the `bank_marketing` dataset. F
 These choices ensure data quality, create meaningful features, and prepare the data appropriately for the selected machine learning models.
 
 ## 5. Feature Processing Summary
-The following table summarizes how key features from the dataset are processed throughout the pipeline, based on `PRD.md` and `pipeline_config.yaml`:
+The following table summarizes how key features from the dataset are processed throughout the pipeline, based on `pipeline_config.yaml`:
 
 | Feature Group / Specific Feature        | Initial Cleaning & Standardization (in `preprocessing.py`)                                     | Transformation & Encoding (in `feat_engin.py` via `ColumnTransformer`)                          | Justification                                              |
 |-------------------------------------------|------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|--------------------------------------------------------------|
