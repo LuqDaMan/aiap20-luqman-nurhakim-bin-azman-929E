@@ -70,7 +70,7 @@ def evaluate_model_on_test_set(
 
     evaluation_results: Dict[str, Any] = {"model_name": model_name}
     metrics_to_calculate = config.get('evaluation_metrics', [])
-    # Assuming 'yes' class (positive class) is encoded as 1, as per PRD and typical setup
+    # Assuming 'yes' class (positive class) is encoded as 1, as per typical setup
     pos_label = 1 
 
     try:

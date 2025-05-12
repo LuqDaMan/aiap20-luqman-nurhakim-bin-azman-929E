@@ -262,6 +262,9 @@ if submitted:
                 st.json(prediction_result)
             with st.expander("View Input Data Sent to API"):
                 st.json({"model_name_sent": selected_model_key, "client_data_sent": client_data_payload})
+
+            # Display interpretation or next steps if available
+            # st.markdown("--- EXTRA INFO HERE ---")
         else:
             # Should ideally be caught by error_msg, but as a fallback
             st.error("An unknown error occurred. No prediction data received.")
@@ -269,6 +272,9 @@ if submitted:
 
 # --- Footer or additional information ---
 st.markdown("---")
-st.caption(f"© {datetime.now().year} {PAGE_TITLE}. Version based on PRD_II v1.1 ({DEPLOY_CONFIG.get('api',{}).get('version','N/A')})")
+st.caption(f"© {datetime.now().year} {PAGE_TITLE}. Version based on v1.1 ({DEPLOY_CONFIG.get('api',{}).get('version','N/A')})")
+
+# For debugging: Show session state
+# if st.checkbox("Show Session State (Debug)"):
 
 logger.info("Streamlit application rendering complete.")

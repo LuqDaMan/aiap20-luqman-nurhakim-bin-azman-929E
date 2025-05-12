@@ -131,7 +131,7 @@ def _preprocess_campaign_calls(df: pd.DataFrame, campaign_calls_config: dict) ->
     
     # Handle NaNs that might have been coerced or were original (impute with median of absolute values)
     # It's better to handle NaNs here if they can occur to prevent issues downstream.
-    # PRD does not specify imputation for campaign_calls, but it's safer.
+    # does not specify imputation for campaign_calls, but it's safer.
     # Using median of non-NaN absolute values.
     if df[original_col].isna().sum() > 0 :
         median_calls = df[original_col].median()
@@ -174,7 +174,7 @@ def _preprocess_previous_contact_days(df: pd.DataFrame, prev_contact_config: dic
     df.loc[df[original_col] == special_value, original_col] = replacement_val
     
     # Handle original NaNs in 'previous_contact_days' if any, after 999 replacement.
-    # PRD DS-FE-001 "For clients who were previously contacted, this feature is numeric (days). Replace 999 with 0"
+    # "For clients who were previously contacted, this feature is numeric (days). Replace 999 with 0"
     # This implies if it was NaN originally, and indicator is False, it should probably be 0 as well, or handled carefully.
     # If it was NaN and indicator is False, let's set it to `replacement_val` too.
     nan_mask = df[original_col].isna()

@@ -5,7 +5,7 @@ from enum import Enum
 
 # Import API_LOGGER and DEPLOY_CONFIG to dynamically create ModelName enum
 # and ModelInput fields if desired, or define them statically.
-# For simplicity and clarity, we'll define them statically here based on PRD_II
+# For simplicity and clarity, we'll define them statically here
 # and the deploy_config.yaml structure we've discussed.
 # The api_utils itself should not be imported here to avoid circular dependencies
 # if schemas were to be used by api_utils for some reason (not the case here).
@@ -17,7 +17,7 @@ from enum import Enum
 #     available_model_keys = ["logistic_regression", "random_forest", "gradient_boosting"]
 # ModelName = Enum("ModelName", {key.upper().replace("_", ""): key for key in available_model_keys})
 # This dynamic approach is powerful but makes static analysis harder.
-# For PRD_II, the models are fixed, so a static Enum is clearer.
+# the models are fixed, so a static Enum is clearer.
 
 class ModelName(str, Enum):
     """
@@ -74,7 +74,7 @@ class PredictionOutput(BaseModel):
     model_used: str = Field(..., example="logistic_regression", description="Identifier of the model that was used for this prediction.")
     predicted_class: str = Field(..., example="yes", description="The predicted class label ('yes' or 'no').")
     probability_yes: Optional[float] = Field(
-        None, # Make it optional as per PRD "SHOULD also include"
+        None,
         ge=0.0, le=1.0, # Probability constraint
         example=0.75,
         description="Predicted probability for the positive class ('yes'). Included if available."

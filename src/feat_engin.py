@@ -108,7 +108,7 @@ def engineer_features_and_split_data(
     transformers_list.extend(ordinal_features_pipelines) # Add defined ordinal pipelines
 
     # Explicitly passthrough boolean columns if they are not part of other transformations
-    # This ensures they are kept "as is (0/1)" per PRD, assuming they are not in numerical_cols for scaling.
+    # This ensures they are kept "as is (0/1)", assuming they are not in numerical_cols for scaling.
     all_transformer_input_cols = log_transform_cols + std_scale_only_cols + nominal_cols + processed_ordinal_cols
     passthrough_bool_cols = [b_col for b_col in boolean_cols if b_col not in all_transformer_input_cols]
     if passthrough_bool_cols:
