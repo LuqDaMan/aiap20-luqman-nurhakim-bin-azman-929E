@@ -4,6 +4,7 @@ venv/
 env/
 
 # Data and logs directories
+artifacts/*
 data/*
 logs/*
 mlruns/*
@@ -11,6 +12,7 @@ plots/*
 results/*
 scripts/*
 tests/*
+
 
 # Python bytecode
 __pycache__/

@@ -1,11 +1,14 @@
 # src/model_trainer.py
 
 import logging
+import os
 import pandas as pd
 import mlflow
 import mlflow.sklearn
+import mlflow.pyfunc
 from mlflow.models.signature import infer_signature
-from typing import Tuple, Dict, Any # Changed from 'Any' to 'Dict' for type hint clarity
+from typing import Tuple, Dict, Any 
+import cloudpickle
 
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.linear_model import LogisticRegression
@@ -25,6 +28,22 @@ except ImportError:
     ImbPipeline = None # Define to avoid NameError if not available
     SMOTE = None
     logger.warning("Imbalanced-learn library not found. SMOTE functionality will be unavailable.")
+
+
+class ProbabilitiesModelWrapper(mlflow.pyfunc.PythonModel):
+    def load_context(self, context):
+        with open(context.artifacts["model_path"], 'rb') as f:
+            self.pipeline = cloudpickle.load(f)
+
+    def predict(self, context, model_input, params=None):
+        # This 'predict' method of the wrapper will be called.
+        # We make it return probabilities.
+        if hasattr(self.pipeline, "predict_proba"):
+            return self.pipeline.predict_proba(model_input)
+        else:
+            # Fallback or error if predict_proba doesn't exist
+            # This shouldn't happen for your scikit-learn classifiers
+            return self.pipeline.predict(model_input)
 
 
 
@@ -55,6 +74,7 @@ def train_and_tune_models(
     cv_folds = config.get('hyperparameter_tuning', {}).get('cv_folds', 5)
     imbalance_config = config.get('imbalance_handling', {})
     random_seed = config.get('random_seed')
+    artifacts_output_dir = config.get('output_paths', {}).get('artifacts_dir', 'artifacts_temp') # For temp model file
 
     # Assuming 'yes' is encoded as 1 (positive class).
     f1_yes_scorer = make_scorer(f1_score, pos_label=1, average='binary')
@@ -69,6 +89,7 @@ def train_and_tune_models(
         input_example = None
 
     for model_name in models_to_train_names:
+        custom_pyfunc_artifact_path = model_name
         with mlflow.start_run(nested=True, run_name=f"train_{model_name}") as nested_run: # Nested run for each model
             logger.info(f"--- Training and tuning: {model_name} (MLflow Nested Run ID: {nested_run.info.run_id}) ---")
             mlflow.log_param("model_name", model_name)
@@ -142,20 +163,61 @@ def train_and_tune_models(
 
             try:
                 grid_search.fit(X_train, y_train)
+                best_pipeline_estimator = grid_search.best_estimator_
                 trained_model_pipelines[model_name] = grid_search.best_estimator_
                 model_best_scores[model_name] = float(grid_search.best_score_) 
                 mlflow.log_metric(f"cv_best_score_{config.get('hyperparameter_tuning', {}).get('scoring_metric_for_tuning', 'f1_yes_scorer')}", grid_search.best_score_)
                 mlflow.log_params(grid_search.best_params_)
-                predictions_proba = grid_search.best_estimator_.predict_proba(input_example)
+
+                # --- Custom Pyfunc Logging ---
+                logger.info(f"Logging {model_name} using custom ProbabilitiesModelWrapper.")
+
+                # 1. Temporarily save the best_pipeline_estimator using cloudpickle
+                #    The custom wrapper's load_context will load this.
+                temp_model_filename = f"{model_name}_temp_pipeline.pkl"
+                temp_model_path = os.path.join(artifacts_output_dir, temp_model_filename)
+                with open(temp_model_path, "wb") as f:
+                    cloudpickle.dump(best_pipeline_estimator, f)
+                logger.debug(f"Temporarily saved best pipeline for {model_name} to {temp_model_path}")
+
+                # 2. Define artifacts for the pyfunc model
+                #    This tells MLflow what local files the custom model needs.
+                artifacts_for_pyfunc = {"model_path": temp_model_path}
+
+                # 3. Get Conda environment
+                #    Use the one from sklearn or define your own if needed.
+                conda_env = mlflow.sklearn.get_default_conda_env()
+                # Add cloudpickle to dependencies if not already there
+                if "cloudpickle" not in conda_env.get("dependencies", []):
+                     pip_dependencies = None
+                     for dep in conda_env.get("dependencies", []):
+                         if isinstance(dep, dict) and "pip" in dep:
+                             pip_dependencies = dep["pip"]
+                             break
+                     if pip_dependencies is None: # if "pip:" section doesn't exist
+                         conda_env.setdefault("dependencies", []).append({"pip": ["cloudpickle"]})
+                     elif "cloudpickle" not in pip_dependencies: # if "pip:" exists but no cloudpickle
+                         pip_dependencies.append("cloudpickle")
+
+                predictions_proba = best_pipeline_estimator.predict_proba(input_example)
                 signature = infer_signature(input_example, predictions_proba)
-                mlflow.sklearn.log_model(
-                        sk_model=grid_search.best_estimator_,
-                        artifact_path=model_name, # This creates a 'models/{model_name}' like structure in MLflow artifacts
-                        input_example=input_example,
-                        signature=signature,
-                        pyfunc_predict_fn="predict_proba",
-                        serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_PICKLE 
-                    )
+                mlflow.pyfunc.log_model(
+                    artifact_path=custom_pyfunc_artifact_path, # This is the path within the MLflow run artifacts
+                    python_model=ProbabilitiesModelWrapper(),
+                    artifacts=artifacts_for_pyfunc,
+                    conda_env=conda_env,
+                    signature=signature, # Use the probability-based signature
+                    input_example=input_example,
+                    # Note: No pyfunc_predict_fn here, the wrapper's predict() IS the desired function
+                    # serialization_format is not directly applicable to mlflow.pyfunc.log_model in the same way as mlflow.sklearn.log_model
+                )
+                logger.info(f"Successfully logged {model_name} with custom Pyfunc wrapper to MLflow artifact path: {custom_pyfunc_artifact_path}")
+                try:
+                    os.remove(temp_model_path)
+                    logger.debug(f"Removed temporary model file: {temp_model_path}")
+                except OSError as e:
+                    logger.warning(f"Could not remove temporary model file {temp_model_path}: {e}")
+
                 logger.info(f"Best F1-score (yes class) for {model_name} (from CV): {grid_search.best_score_:.4f}")
                 logger.info(f"Best parameters for {model_name}: {grid_search.best_params_}")
                 logger.info(f"Logged {model_name} model and params to MLflow.")
@@ -165,6 +227,13 @@ def train_and_tune_models(
                 model_best_scores[model_name] = -1.0     # Indicate failure or very poor performance
                 mlflow.log_param(f"{model_name}_training_status", "failed")
                 mlflow.set_tag(f"{model_name}_error", str(e))
+                # If a temp file was created and an error occurred before removal
+                if 'temp_model_path' in locals() and os.path.exists(temp_model_path):
+                    try:
+                        os.remove(temp_model_path)
+                    except OSError:
+                        pass # Avoid error in error handling
+
 
     if not trained_model_pipelines or not any(pipeline is not None for pipeline in trained_model_pipelines.values()):
         logger.error("No models were successfully trained. Cannot determine the best model.")

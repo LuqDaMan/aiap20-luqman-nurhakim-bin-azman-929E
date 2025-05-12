@@ -1,0 +1,200 @@
+api:
+  host: 0.0.0.0
+  port: 8000
+  reload: true
+  workers: 4
+mlflow:
+  tracking_server_uri: http://localhost:5001
+  experiment_name: Default
+mlflow_model_servers:
+  logistic_regression:
+    host: 127.0.0.1
+    port: 5002
+    model_uri: runs:/227bb3c50c4c48c6b3beda8a8fb8bec8/LogisticRegression
+    workers: 1
+    timeout: 120
+  random_forest:
+    host: 127.0.0.1
+    port: 5003
+    model_uri: runs:/8349686a0f16450196b520d8880e0347/RandomForestClassifier
+    workers: 1
+    timeout: 120
+  gradient_boosting:
+    host: 127.0.0.1
+    port: 5004
+    model_uri: runs:/3b1876510cff486dbc7c609d269c4eb2/GradientBoostingClassifier
+    workers: 1
+    timeout: 120
+available_models:
+  logistic_regression:
+    name_display: Logistic Regression
+    description: Logistic Regression model for term deposit prediction.
+  random_forest:
+    name_display: Random Forest
+    description: Random Forest model for term deposit prediction.
+  gradient_boosting:
+    name_display: Gradient Boosting
+    description: Gradient Boosting model for term deposit prediction.
+streamlit_app:
+  title: Bank Term Deposit Subscription Prediction
+  api_base_url: http://localhost:8000
+  server_address: 0.0.0.0
+  server_port: 8501
+  predict_endpoint: /predict/
+  raw_features_form_input:
+  - name: age
+    label: Age
+    widget: number_input
+    params:
+      min_value: 17
+      max_value: 98
+      value: 30
+      step: 1
+      help: Client's age in years.
+  - name: job
+    label: Job Type
+    widget: selectbox
+    params:
+      options:
+      - admin.
+      - blue-collar
+      - entrepreneur
+      - housemaid
+      - management
+      - retired
+      - self-employed
+      - services
+      - student
+      - technician
+      - unemployed
+      - unknown
+      index: 9
+      help: Type of client's job.
+  - name: marital
+    label: Marital Status
+    widget: selectbox
+    params:
+      options:
+      - divorced
+      - married
+      - single
+      - unknown
+      index: 1
+      help: Client's marital status.
+  - name: education
+    label: Education Level
+    widget: selectbox
+    params:
+      options:
+      - basic.4y
+      - basic.6y
+      - basic.9y
+      - high.school
+      - illiterate
+      - professional.course
+      - university.degree
+      - unknown
+      index: 6
+      help: Client's education level.
+  - name: default
+    label: Credit in Default?
+    widget: radio
+    params:
+      options:
+      - 'no'
+      - 'yes'
+      - unknown
+      index: 0
+      help: Does the client have credit in default?
+  - name: housing
+    label: Housing Loan?
+    widget: radio
+    params:
+      options:
+      - 'no'
+      - 'yes'
+      - unknown
+      index: 0
+      help: Does the client have a housing loan?
+  - name: loan
+    label: Personal Loan?
+    widget: radio
+    params:
+      options:
+      - 'no'
+      - 'yes'
+      - unknown
+      index: 0
+      help: Does the client have a personal loan?
+  - name: contact
+    label: Contact Method
+    widget: selectbox
+    params:
+      options:
+      - cellular
+      - telephone
+      index: 0
+      help: Last contact communication type.
+  - name: campaign_calls
+    label: Campaign Contacts
+    widget: number_input
+    params:
+      min_value: -100
+      max_value: 100
+      value: 1
+      step: 1
+      help: 'Number of contacts performed during this campaign for this client. Note:
+        Negative values are allowed and will be handled by the system.'
+  - name: pdays
+    label: Days Since Previous Contact
+    widget: number_input
+    params:
+      min_value: 0
+      max_value: 999
+      value: 999
+      step: 1
+      help: Days since client was last contacted. Enter 999 if client was never contacted
+        before (this is a special value).
+  - name: previously_contacted_toggle
+    label: Was client previously contacted?
+    widget: checkbox
+    params:
+      value: false
+      help: Check this if the client was previously contacted (will set days to 0
+        if checked, 999 if unchecked).
+logging:
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(module)s.%(funcName)s:%(lineno)d
+    - %(message)s'
+  date_format: '%Y-%m-%d %H:%M:%S'
+  timestamp_log_files: true
+  max_size_bytes: 10485760
+  backup_count: 5
+  api:
+    logger_name: bank_term_deposit_api
+    level: INFO
+    log_dir: logs/api
+    log_file_base_name: api_service.log
+  streamlit:
+    logger_name: bank_term_deposit_streamlit
+    level: INFO
+    log_dir: logs/streamlit
+    log_file_base_name: streamlit_app.log
+prediction_service:
+  output:
+    class_labels:
+      '0': 'no'
+      '1': 'yes'
+    include_probabilities: true
+  model_input_features_after_preprocessing_ref:
+  - cleaned_age
+  - occupation
+  - marital_status
+  - education_level
+  - credit_default
+  - housing_loan
+  - personal_loan
+  - contact_method
+  - campaign_calls
+  - cc_had_negative_adjustment
+  - previous_contact_days
+  - previously_contacted
