@@ -4,9 +4,16 @@
 project_name: "BankTermDepositPrediction"
 random_seed: 42  # For reproducibility
 
+# --- MLflow Server ---
+mlflow_server:
+  host: "127.0.0.1"
+  port: 5001 # Your desired port
+  backend_store_uri: "./mlruns" 
+  default_artifact_root: "./mlruns" 
+
 # --- Logging ---
 logging:
-  level: "DEBUG"  # or "INFO" if you prefer less verbose logs
+  level: "DEBUG"  
   file: "logs/pipeline/run.log"  # This is where logs will be saved
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   max_size_mb: 10  # Log files rotate after reaching this size

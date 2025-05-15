@@ -81,7 +81,16 @@ aiap20-luqman-nurhakim-bin-azman-929E/
     git clone https://github.com/LuqDaMan/aiap20-luqman-nurhakim-bin-azman-929E.git
     cd aiap20-luqman-nurhakim-bin-azman-929E
     ```
-2.  **Environment Setup & Dependencies:**
+
+2.  **System Prerequisites:**
+    * **Homebrew (macOS):** Ensure Homebrew is installed. If not, follow instructions at [https://brew.sh/](https://brew.sh/).
+    * **jq:** This project uses `yq` for parsing YAML configuration files, and `yq` in turn requires `jq`. Install `jq` using Homebrew:
+        ```bash
+        brew install jq
+        ```
+    * **Python 3:** Ensure Python 3 (e.g., 3.8+) is installed.
+
+3.  **Environment Setup & Dependencies:**
     The `run.sh` and `run_app.sh` scripts handle Python virtual environment creation and dependency installation from `requirements.txt`.
     To set up manually:
     ```bash
@@ -90,8 +99,8 @@ aiap20-luqman-nurhakim-bin-azman-929E/
     pip install -r requirements.txt
     ```
 
-3.  **Start MLflow Tracking Server:**
-    To view experiment results and model artifacts, start the MLflow UI:
+4.  **Start MLflow Tracking Server (Optional, if not using `run.sh`):**
+    If you wish to run the MLflow UI independently (note: `run.sh` starts its own MLflow server instance):
     ```bash
     mlflow ui --host 127.0.0.1
     ```

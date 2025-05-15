@@ -17,34 +17,46 @@ VENV_PATH="$PROJECT_ROOT/.venv/bin/activate" # Common .venv path
 # Function to read value from YAML using yq
 # Usage: get_yaml_value <key_path_for_yq> <default_value>
 get_yaml_value() {
-    local key_path="$1"
+    local key_path_input="$1"       # e.g., '.mlflow.tracking_server_uri'
     local default_value="$2"
+    local config_file_to_read="${3:-$DEPLOY_CONFIG_FILE}" # Use 3rd arg or fallback to DEPLOY_CONFIG_FILE
+
     local value=""
+    local yq_filter_path="$key_path_input"
+    local yq_exit_code=0
 
-    if ! command -v yq &> /dev/null; then
-        # yq not found, use default
+    # 1. Check if yq and jq commands are available
+    if ! command -v yq &> /dev/null || ! command -v jq &> /dev/null; then
+        # Optional: Add a one-time warning if yq or jq is missing, if desired.
+        # echo "Warning: yq or jq not found. Using default for $key_path_input." >&2
         echo "$default_value"
         return
     fi
 
-    if [ ! -f "$DEPLOY_CONFIG_FILE" ]; then
-        echo "Warning: Config file $DEPLOY_CONFIG_FILE not found. Using default for $key_path."
+    # 2. Check if the configuration file exists
+    if [ ! -f "$config_file_to_read" ]; then
+        # Optional: Add a warning if the config file is missing.
+        # echo "Warning: Config file $config_file_to_read not found for $key_path_input. Using default." >&2
         echo "$default_value"
         return
     fi
-    
-    # Attempt to read value using yq
-    # Using `yq eval` for yq v4+ (e.g. Python's yq or kislyuk/yq)
-    # For mikefarah/yq (Go binary), it might be `yq r $DEPLOY_CONFIG_FILE $key_path_dotted`
-    # This example assumes `yq eval` syntax.
-    value=$(yq eval "$key_path" "$DEPLOY_CONFIG_FILE" 2>/dev/null)
 
-    # Check if yq returned null (key not found) or empty string
-    if [ "$value" = "null" ] || [ -z "$value" ]; then
-        # echo "Warning: Key '$key_path' not found or empty in $DEPLOY_CONFIG_FILE. Using default."
+    # 3. Execute yq with raw output option.
+    # Suppress stderr for common cases like path not found (yq -r might still exit 0).
+    value=$(yq -r "$yq_filter_path" "$config_file_to_read" 2>/dev/null)
+    yq_exit_code=$?
+
+    # 4. Determine if the default value should be used
+    # Use default if:
+    #   a) yq exited with an error.
+    #   b) yq exited successfully BUT returned an empty string (and that empty string is not a valid "false" boolean).
+    #   c) yq returned the literal string "null".
+    if [ $yq_exit_code -ne 0 ] || \
+       { [ $yq_exit_code -eq 0 ] && [ -z "$value" ] && [ "$value" != "false" ]; } || \
+       [ "$value" = "null" ]; then
         echo "$default_value"
     else
-        echo "$value"
+        echo "$value" # Value is successfully retrieved and should be raw
     fi
 }
 

@@ -205,6 +205,7 @@ def train_and_tune_models(
                     artifact_path=custom_pyfunc_artifact_path, # This is the path within the MLflow run artifacts
                     python_model=ProbabilitiesModelWrapper(),
                     artifacts=artifacts_for_pyfunc,
+                    code_path=["src/model_trainer.py"], # Include the src directory to ensure all custom modules are available
                     conda_env=conda_env,
                     signature=signature, # Use the probability-based signature
                     input_example=input_example,
