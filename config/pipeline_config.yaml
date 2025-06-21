@@ -3,6 +3,8 @@
 # --- General Settings ---
 project_name: "BankTermDepositPrediction"
 random_seed: 42  # For reproducibility
+mlflow:
+  experiment_name: "bank_term_deposit_prediction"
 
 # --- MLflow Server ---
 mlflow_server:

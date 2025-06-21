@@ -33,6 +33,8 @@ def run_pipeline(config_path: str):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f"{config.get('project_name', 'MLPipelineRun')}_{timestamp}"
         artifacts_dir = config['output_paths']['artifacts_dir']
+        experiment_name = config['mlflow']['experiment_name']
+        mlflow.set_experiment(experiment_name)
 
         with mlflow.start_run(run_name=run_name) as run:
             run_id = run.info.run_id

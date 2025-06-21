@@ -5,24 +5,24 @@ api:
   workers: 4
 mlflow:
   tracking_server_uri: http://localhost:5001
-  experiment_name: Default
+  experiment_name: bank_term_deposit_prediction
 mlflow_model_servers:
   logistic_regression:
     host: 127.0.0.1
     port: 5002
-    model_uri: runs:/6a7d16ecc34d40b2842bc02dc2d1d703/LogisticRegression
+    model_uri: runs:/a8c8de9a17564bbd9503c4af8fb51826/LogisticRegression
     workers: 1
     timeout: 120
   random_forest:
     host: 127.0.0.1
     port: 5003
-    model_uri: runs:/5d162208fa4f463ea2b473af2263557d/RandomForestClassifier
+    model_uri: runs:/cb0260911976409b9d178bbf2c26e20d/RandomForestClassifier
     workers: 1
     timeout: 120
   gradient_boosting:
     host: 127.0.0.1
     port: 5004
-    model_uri: runs:/056757f5c76c4c5091e9e55b67c30e6f/GradientBoostingClassifier
+    model_uri: runs:/46277ea4b6f544e29ddaf096626796fe/GradientBoostingClassifier
     workers: 1
     timeout: 120
 available_models:
