@@ -12,7 +12,7 @@ from utils.pipe_utils import load_config, setup_logging, set_global_random_seed
 
 from data_ingestion import ingest_data
 from preprocessing import preprocess_data
-from feat_engin import engineer_features_and_split_data
+from feat_engin import engineer_features_and_split_data, engineer_features_only
 from model_trainer import train_and_tune_models
 from model_evaluator import evaluate_model_on_test_set
 
@@ -47,27 +47,70 @@ def run_pipeline(config_path: str):
             raw_df = ingest_data(config['data_source']) 
             logging.info(f"Data ingestion complete. Initial DataFrame shape: {raw_df.shape}")
 
-            # --- Step 2: Data Cleaning & Preprocessing ---
-            logging.info("===== Initiating Data Cleaning & Preprocessing =====")
-            cleaned_df = preprocess_data(raw_df, config) # Replace with actual call
-            logging.info(f"Data cleaning and preprocessing complete. DataFrame shape: {cleaned_df.shape}")
+            # --- Step 1.5: Early Train/Test Split (Before Preprocessing) ---
+            logging.info("===== Performing Early Train/Test Split =====")
+            target_col = config.get('target_column')
+            if not target_col or target_col not in raw_df.columns:
+                # Handle case where target column name needs standardization
+                raw_df_temp = raw_df.copy()
+                raw_df_temp.columns = raw_df_temp.columns.str.lower().str.replace(' ', '_').str.replace('[^0-9a-zA-Z_]', '', regex=True)
+                target_col = config.get('target_column')
+            
+            split_config = config.get('train_test_split', {})
+            test_size = split_config.get('test_size', 0.2)
+            stratify_target = split_config.get('stratify_by_target', True)
+            random_seed = config.get('random_seed', 42)
+            
+            # Split raw data before any preprocessing
+            from sklearn.model_selection import train_test_split
+            if target_col in raw_df.columns or target_col in raw_df_temp.columns:
+                if target_col in raw_df.columns:
+                    stratify_col = raw_df[target_col] if stratify_target else None
+                else:
+                    stratify_col = raw_df_temp[target_col] if stratify_target else None
+                
+                raw_train_df, raw_test_df = train_test_split(
+                    raw_df,
+                    test_size=test_size,
+                    random_state=random_seed,
+                    stratify=stratify_col
+                )
+                logging.info(f"Early split complete. Train: {raw_train_df.shape}, Test: {raw_test_df.shape}")
+            else:
+                logging.error(f"Target column '{target_col}' not found for stratification. Performing random split.")
+                raw_train_df, raw_test_df = train_test_split(
+                    raw_df,
+                    test_size=test_size,
+                    random_state=random_seed,
+                    stratify=None
+                )
 
-            # --- Step 3: Feature Engineering & Data Splitting ---
-            logging.info("===== Initiating Feature Engineering & Data Splitting =====")
-            X_train, X_test, y_train, y_test, preprocessor_object = engineer_features_and_split_data(cleaned_df.copy(), config)
+            # --- Step 2: Data Cleaning & Preprocessing (Train Only) ---
+            logging.info("===== Initiating Data Cleaning & Preprocessing (Train Set) =====")
+            cleaned_train_df = preprocess_data(raw_train_df, config)
+            logging.info(f"Train data cleaning and preprocessing complete. DataFrame shape: {cleaned_train_df.shape}")
+            
+            logging.info("===== Initiating Data Cleaning & Preprocessing (Test Set) =====")
+            cleaned_test_df = preprocess_data(raw_test_df, config)
+            logging.info(f"Test data cleaning and preprocessing complete. DataFrame shape: {cleaned_test_df.shape}")
+
+            # --- Step 3: Feature Engineering (Train Only, Fit Transformers) ---
+            logging.info("===== Initiating Feature Engineering (Train Set) =====")
+            X_train, y_train, preprocessor_object = engineer_features_only(cleaned_train_df.copy(), config, fit_transformers=True)
+            
+            logging.info("===== Applying Feature Engineering (Test Set) =====")
+            X_test, y_test = engineer_features_only(cleaned_test_df.copy(), config, fit_transformers=False, preprocessor=preprocessor_object)
+            
             os.makedirs(artifacts_dir, exist_ok=True)
             preprocessor_filename = "preprocessor.joblib"
             preprocessor_save_path = os.path.join(artifacts_dir, preprocessor_filename)
             try:
                 joblib.dump(preprocessor_object, preprocessor_save_path)
                 logging.info(f"Preprocessor object saved to: {preprocessor_save_path}")
-                # Log as an MLflow artifact as well, so it's versioned with the run
-                mlflow.log_artifact(preprocessor_save_path, artifact_path="preprocessor_artefact") # artifact_path is a subfolder in MLflow
+                mlflow.log_artifact(preprocessor_save_path, artifact_path="preprocessor_artefact")
             except Exception as e:
                 logging.error(f"Error saving preprocessor object: {e}", exc_info=True)
-                # Decide if this is a critical error that should stop the pipeline
-                # raise # Uncomment to make it critical
-            logging.info("Feature engineering and data splitting complete.")
+            logging.info("Feature engineering complete.")
 
             # --- Step 4: Model Training & Tuning ---
             logging.info("===== Initiating Model Training & Tuning =====")

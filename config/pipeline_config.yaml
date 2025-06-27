@@ -2,7 +2,7 @@
 
 # --- General Settings ---
 project_name: "BankTermDepositPrediction"
-random_seed: 42  # For reproducibility
+random_seed: 42 
 mlflow:
   experiment_name: "bank_term_deposit_prediction"
 
@@ -81,8 +81,8 @@ education_level_order:
   - "basic.6y"
   - "basic.9y"
   - "high.school"
-  - "professional.course"
-  - "university.degree" # Treat unknown as a distinct category
+  - "university.degree"
+  -  "professional.course" # Treat unknown as a distinct category
 
 # Features for different transformations/encoding (will be dynamically identified but can list fixed ones)
 # (Nominal features for One-Hot Encoding)
@@ -123,7 +123,7 @@ models_to_train:
 # (Hyperparameter Tuning)
 hyperparameter_tuning:
   cv_folds: 5
-  scoring_metric_for_tuning: "f1_weighted" # Or 'f1_macro', 'roc_auc' depending on focus for best params
+  scoring_metric_for_tuning: "recall" # Or 'f1_weighted', 'f1_macro', 'recall' depending on focus for best params
 
   # Example search spaces (can be more detailed)
   param_grids:

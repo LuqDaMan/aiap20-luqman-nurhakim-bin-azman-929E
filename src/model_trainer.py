@@ -14,7 +14,7 @@ from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.pipeline import Pipeline as SKPipeline # Renamed for clarity
-from sklearn.metrics import make_scorer, f1_score
+from sklearn.metrics import make_scorer, f1_score, recall_score
 
 logger = logging.getLogger('pipeline.model_trainer')
 
@@ -76,8 +76,19 @@ def train_and_tune_models(
     random_seed = config.get('random_seed')
     artifacts_output_dir = config.get('output_paths', {}).get('artifacts_dir', 'artifacts_temp') # For temp model file
 
-    # Assuming 'yes' is encoded as 1 (positive class).
-    f1_yes_scorer = make_scorer(f1_score, pos_label=1, average='binary')
+    # Replace the hardcoded f1_yes_scorer with a dynamic approach
+    scoring_metric = config.get('hyperparameter_tuning', {}).get('scoring_metric_for_tuning', 'f1')
+    if scoring_metric == 'f1':
+        scorer = make_scorer(f1_score, pos_label=1, average='binary')
+    elif scoring_metric == 'f1_weighted':
+        scorer = make_scorer(f1_score, average='weighted')
+    elif scoring_metric == 'f1_macro':
+        scorer = make_scorer(f1_score, average='macro')
+    elif scoring_metric == 'recall':
+        scorer = make_scorer(recall_score, pos_label=1, average='binary')
+    else:
+        # Default fallback
+        scorer = scoring_metric
 
     trained_model_pipelines: Dict[str, Any] = {}
     model_best_scores: Dict[str, float] = {}
@@ -155,7 +166,7 @@ def train_and_tune_models(
             grid_search = GridSearchCV(
                 estimator=model_pipeline,
                 param_grid=current_param_grid,
-                scoring=f1_yes_scorer,
+                scoring=scorer,
                 cv=strat_k_fold,
                 n_jobs=-1, # Use all available cores
                 verbose=1  # Set to 0 for less verbosity, 1 or higher for more.
@@ -166,7 +177,7 @@ def train_and_tune_models(
                 best_pipeline_estimator = grid_search.best_estimator_
                 trained_model_pipelines[model_name] = grid_search.best_estimator_
                 model_best_scores[model_name] = float(grid_search.best_score_) 
-                mlflow.log_metric(f"cv_best_score_{config.get('hyperparameter_tuning', {}).get('scoring_metric_for_tuning', 'f1_yes_scorer')}", grid_search.best_score_)
+                mlflow.log_metric(f"cv_best_score_{config.get('hyperparameter_tuning', {}).get('scoring_metric_for_tuning', 'f1')}", grid_search.best_score_)
                 mlflow.log_params(grid_search.best_params_)
 
                 # --- Custom Pyfunc Logging ---

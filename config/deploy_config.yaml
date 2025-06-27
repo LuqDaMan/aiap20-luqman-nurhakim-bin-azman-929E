@@ -10,19 +10,19 @@ mlflow_model_servers:
   logistic_regression:
     host: 127.0.0.1
     port: 5002
-    model_uri: runs:/a8c8de9a17564bbd9503c4af8fb51826/LogisticRegression
+    model_uri: runs:/8ec2a8cbced4445a9bcef804b9240dd6/LogisticRegression
     workers: 1
     timeout: 120
   random_forest:
     host: 127.0.0.1
     port: 5003
-    model_uri: runs:/cb0260911976409b9d178bbf2c26e20d/RandomForestClassifier
+    model_uri: runs:/abef7109afc74073aee18db671ae6c86/RandomForestClassifier
     workers: 1
     timeout: 120
   gradient_boosting:
     host: 127.0.0.1
     port: 5004
-    model_uri: runs:/46277ea4b6f544e29ddaf096626796fe/GradientBoostingClassifier
+    model_uri: runs:/936f126e99604b2b982207b786b24850/GradientBoostingClassifier
     workers: 1
     timeout: 120
 available_models:
